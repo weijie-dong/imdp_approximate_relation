@@ -8,6 +8,8 @@ from .MountainCar import MountainCar
 from .Cartpole import Cartpole
 from .Integrators import DoubleIntegrator
 from .Test1D import Test1D
+from .Dubins3D_approx_sim import Dubins3DApproxSim
+from .DoubleIntegrator_approx_sim import DoubleIntegratorApproxSim
 
 
 def create_model(args):
@@ -24,6 +26,8 @@ def create_model(args):
 		'Cartpole': Cartpole,
 		'DoubleIntegrator': DoubleIntegrator,
 		'Test1D': Test1D,
+		'Dubins3DApproxSim': Dubins3DApproxSim,
+		'DoubleIntegratorApproxSim': DoubleIntegratorApproxSim,
 	}
 
 	model_cls = model_map.get(args.model)

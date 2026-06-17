@@ -1,0 +1,135 @@
+# IMDP Approximate Simulation — 运行配置
+#
+# builds: 单个 IMDP 构建配置
+# pairs:  成对近似仿真分析（引用 builds 中的两个配置）
+#
+# 用法:
+#   python run_pipeline.py build --config configs/approx_sim.yaml di_coarse
+#   python run_pipeline.py pair  --config configs/approx_sim.yaml di_coarse_fine
+
+# ============================================================
+# 单个 IMDP 构建
+# ============================================================
+
+builds:
+  # ---- DoubleIntegrator ----
+  di_coarse:
+    model: DoubleIntegratorApproxSim
+    resolution: coarse      # 7×7 = 49 states
+    seed: 42
+    output_dir: output/di_coarse
+
+  di_medium:
+    model: DoubleIntegratorApproxSim
+    resolution: medium      # 14×14 = 196 states
+    seed: 42
+    output_dir: output/di_medium
+
+  di_fine:
+    model: DoubleIntegratorApproxSim
+    resolution: fine        # 21×21 = 441 states
+    seed: 42
+    output_dir: output/di_fine
+
+  di_medium_x2:
+    model: DoubleIntegratorApproxSim
+    resolution: medium_x2   # 28×28 = 784 states
+    seed: 42
+    output_dir: output/di_medium_x2
+
+  di_fine_x2:
+    model: DoubleIntegratorApproxSim
+    resolution: fine_x2     # 42×42 = 1764 states
+    seed: 42
+    output_dir: output/di_fine_x2
+
+  # ---- 5-action variants (u ∈ {-5, -2.5, 0, 2.5, 5}) ----
+  di_medium_5act:
+    model: DoubleIntegratorApproxSim
+    resolution: medium_5act  # 14×14 = 196 states, V≈0.688
+    seed: 42
+    output_dir: output/di_medium_5act
+
+  # ---- 7-action variants (u ∈ {-5, -3.33, -1.67, 0, 1.67, 3.33, 5}) ----
+  di_fine_7act:
+    model: DoubleIntegratorApproxSim
+    resolution: fine_7act    # 21×21 = 441 states, V≈0.995
+    seed: 42
+    output_dir: output/di_fine_7act
+
+# ============================================================
+# 成对近似仿真分析
+# ============================================================
+
+pairs:
+  # 快速验证流程 (49→49, 相同网格, 预期 ε=0)
+  demo:
+    coarse_build: di_coarse
+    fine_build: di_coarse
+    output_dir: output/demo
+    seed: 42
+    eps_tol: 0.001
+    n_jobs: -1
+    mc_iterations: 5000
+    sim_horizon: 200
+    skip_mc: false
+
+  # 非整数比实际运行 (196→441, 1.5×)
+  di_medium_fine:
+    coarse_build: di_medium
+    fine_build: di_fine
+    output_dir: output/di_medium_fine
+    seed: 42
+    eps_tol: 0.001
+    n_jobs: -1
+    mc_iterations: 5000
+    sim_horizon: 200
+    skip_mc: false
+
+  # 小规模实际运行 (49→441)
+  di_coarse_fine:
+    coarse_build: di_coarse
+    fine_build: di_fine
+    output_dir: output/di_coarse_fine
+    seed: 42
+    eps_tol: 0.001
+    n_jobs: -1
+    mc_iterations: 5000
+    sim_horizon: 200
+    skip_mc: false
+
+  # 中等规模 (196→1764)
+  di_medium_fine_x2:
+    coarse_build: di_medium
+    fine_build: di_fine_x2
+    output_dir: output/di_medium_fine_x2
+    seed: 42
+    eps_tol: 0.001
+    n_jobs: -1
+    mc_iterations: 5000
+    sim_horizon: 200
+    skip_mc: false
+
+  # 较大规模 (441→1764)
+  di_fine_fine_x2:
+    coarse_build: di_fine
+    fine_build: di_fine_x2
+    output_dir: output/di_fine_fine_x2
+    seed: 42
+    eps_tol: 0.001
+    n_jobs: -1
+    mc_iterations: 5000
+    sim_horizon: 200
+    skip_mc: false
+
+  # 推荐案例：多动作高V值 (196→441, 5act→7act, V_coarse≈0.69, V_fine≈0.99)
+  di_medium_5act_fine_7act:
+    coarse_build: di_medium_5act
+    fine_build: di_fine_7act
+    output_dir: output/di_medium_5act_fine_7act
+    seed: 42
+    eps_tol: 0.001
+    n_jobs: -1
+    mc_iterations: 5000
+    sim_horizon: 200
+    skip_mc: false
