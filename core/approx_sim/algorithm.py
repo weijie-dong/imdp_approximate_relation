@@ -20,6 +20,8 @@ from tqdm import tqdm
 
 from .corners import enumerate_corners, get_successor_info
 from .coupling import check_coupling
+from .coupling_dual import check_coupling_dual
+from .lazy_enum import check_coupling_lazy
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,9 @@ def compute_approx_sim(
     init_R=None,
     verbose=True,
     n_jobs=-1,
+    method='corner',
+    lp_solver='HIGHS',
+    action_order=True,
 ):
     """
     Compute the maximal competitive ε-approximate simulation relation.
@@ -51,6 +56,8 @@ def compute_approx_sim(
     :param init_R: optional set of (s1,s2) pairs to warm-start from
     :param verbose: print progress
     :param n_jobs: number of parallel threads. -1 for all CPUs, 1 for sequential.
+    :param method: 'corner' (per-vertex LP, default) or 'dual' (single nested dual LP)
+    :param lp_solver: CVXPY solver name (default 'HIGHS')
     :return: dict with keys R, iterations, total_lp_calls, total_lp_time, wall_time
     """
     if n_jobs <= 0:
@@ -153,7 +160,23 @@ def compute_approx_sim(
             succ2_set = set(int(x) for x in succ2)
 
             found_defender = False
-            for a1_pos in range(num_a1):
+            # Order fine actions by proximity to coarse action input value
+            if action_order:
+                try:
+                    a2_input = imdp2.actions_inputs[a2_pos]
+                    a1_order = sorted(
+                        range(num_a1),
+                        key=lambda i: float(
+                            np.linalg.norm(
+                                np.array(imdp1.actions_inputs[i]) - np.array(a2_input)
+                            )
+                        ),
+                    )
+                except Exception:
+                    a1_order = list(range(num_a1))
+            else:
+                a1_order = list(range(num_a1))
+            for a1_pos in a1_order:
                 t0 = time.time()
                 corners1, succ1, pl1, pu1 = _get_corners(1, s1, a1_pos)
                 _corner_time += time.time() - t0
@@ -176,18 +199,39 @@ def compute_approx_sim(
                     prefilter_skipped += 1
                     continue
 
-                # Check coupling feasibility for all fine corners
-                all_ok = True
-                for c1 in corners1:
-                    result = check_coupling(
-                        c1, corners2, succ1, succ2, R_frozen, epsilon,
+                # Check coupling feasibility
+                if method == 'dual':
+                    # Nested dual LP: single LP replaces all per-corner LPs
+                    result = check_coupling_dual(
+                        pl1, pu1, corners2, succ1, succ2, R_frozen, epsilon,
+                        solver=lp_solver,
                     )
                     lp_calls += 1
                     lp_time += result['solve_time']
+                    all_ok = result['feasible']
+                elif method == 'lazy':
+                    # Lazy corner enumeration via cutting-plane
+                    result = check_coupling_lazy(
+                        pl1, pu1, corners2, succ1, succ2, R_frozen, epsilon,
+                        solver=lp_solver,
+                    )
+                    lp_calls += result['lp_calls']
+                    lp_time += result['lp_time']
+                    all_ok = result['feasible']
+                else:
+                    # Original per-corner enumeration
+                    all_ok = True
+                    for c1 in corners1:
+                        result = check_coupling(
+                            c1, corners2, succ1, succ2, R_frozen, epsilon,
+                            solver=lp_solver,
+                        )
+                        lp_calls += 1
+                        lp_time += result['solve_time']
 
-                    if not result['feasible']:
-                        all_ok = False
-                        break
+                        if not result['feasible']:
+                            all_ok = False
+                            break
 
                 if all_ok:
                     found_defender = True

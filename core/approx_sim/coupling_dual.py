@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def check_coupling_dual(P1_lower, P1_upper, V2, succ1_ids, succ2_ids,
-                        R_local, epsilon, tol=1e-8):
+                        R_local, epsilon, tol=1e-8, solver=None):
     """Check coupling feasibility via single dual LP.
 
     Instead of iterating over vertices of the fine probability polytope P1,
@@ -137,7 +137,7 @@ def check_coupling_dual(P1_lower, P1_upper, V2, succ1_ids, succ2_ids,
     prob = cp.Problem(objective, constraints)
 
     try:
-        prob.solve(verbose=False)
+        prob.solve(verbose=False, solver=solver)
     except cp.error.SolverError as e:
         logger.debug('CVXPY dual-LP solver error: %s', e)
         return {

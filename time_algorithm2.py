@@ -131,6 +131,13 @@ def main():
                         help='Tolerance for epsilon binary search')
     parser.add_argument('--n_jobs', type=int, default=-1,
                         help='Number of parallel threads. -1 for all CPUs.')
+    parser.add_argument('--method', type=str, default='corner',
+                        choices=['corner', 'dual', 'lazy'],
+                        help='LP method: corner (per-vertex) or dual (nested dual LP)')
+    parser.add_argument('--lp_solver', type=str, default='HIGHS',
+                        help='CVXPY LP solver (default: HIGHS)')
+    parser.add_argument('--no-action-order', action='store_true',
+                        help='Disable action proximity ordering (use index order)')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--rebuild', action='store_true',
                         help='Force rebuild IMDPs (ignore disk cache)')
@@ -230,6 +237,9 @@ def main():
             tol=extra_args.eps_tol,
             verbose=True,
             n_jobs=extra_args.n_jobs,
+            method=extra_args.method,
+            lp_solver=extra_args.lp_solver,
+            action_order=not extra_args.no_action_order,
         )
     except Exception:
         _log('[Phase 3] ERROR during epsilon search:')

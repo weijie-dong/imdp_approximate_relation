@@ -25,6 +25,9 @@ def compute_min_epsilon(
     max_iter=50,
     verbose=True,
     n_jobs=-1,
+    method='corner',
+    lp_solver='HIGHS',
+    action_order=True,
 ):
     """
     Binary search for the minimal ε such that the initial states are in the
@@ -85,7 +88,7 @@ def compute_min_epsilon(
 
     result_hi = compute_approx_sim(
         imdp1, imdp2, f2c_map, partition1, partition2,
-        epsilon=1.0, init_R=None, verbose=verbose, n_jobs=n_jobs,
+        epsilon=1.0, init_R=None, verbose=verbose, n_jobs=n_jobs, method=method, lp_solver=lp_solver, action_order=action_order,
     )
 
     if (s0_fine, s0_coarse) not in result_hi['R']:
@@ -112,7 +115,7 @@ def compute_min_epsilon(
 
     result_lo = compute_approx_sim(
         imdp1, imdp2, f2c_map, partition1, partition2,
-        epsilon=0.0, init_R=R_hi, verbose=verbose, n_jobs=n_jobs,
+        epsilon=0.0, init_R=R_hi, verbose=verbose, n_jobs=n_jobs, method=method, lp_solver=lp_solver, action_order=action_order,
     )
 
     history.append({
@@ -145,7 +148,7 @@ def compute_min_epsilon(
 
         result = compute_approx_sim(
             imdp1, imdp2, f2c_map, partition1, partition2,
-            epsilon=mid, init_R=R_hi, verbose=verbose, n_jobs=n_jobs,
+            epsilon=mid, init_R=R_hi, verbose=verbose, n_jobs=n_jobs, method=method, lp_solver=lp_solver, action_order=action_order,
         )
 
         feasible = (s0_fine, s0_coarse) in result['R']

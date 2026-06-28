@@ -169,3 +169,7 @@ cython_debug/
 
 # VS Code
 .vscode/
+
+# Local doc drafts (not to be tracked)
+doc_en/email_draft.md
+doc_en/project_overview.md

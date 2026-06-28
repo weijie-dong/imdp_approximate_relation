@@ -105,6 +105,13 @@ def main():
                         help='Simulation horizon for MC validation')
     parser.add_argument('--n_jobs', type=int, default=-1,
                         help='Number of parallel threads for Algorithm 2. -1 for all CPUs, 1 for sequential.')
+    parser.add_argument('--method', type=str, default='corner',
+                        choices=['corner', 'dual', 'lazy'],
+                        help='LP method for Algorithm 2: corner (per-vertex) or dual (nested dual LP)')
+    parser.add_argument('--lp_solver', type=str, default='HIGHS',
+                        help='CVXPY LP solver (default: HIGHS)')
+    parser.add_argument('--no-action-order', action='store_true',
+                        help='Disable action proximity ordering (use index order)')
     parser.add_argument('--skip_mc', action='store_true',
                         help='Skip Monte Carlo validation (faster)')
     parser.add_argument('--skip_eps_search', action='store_true',
@@ -189,6 +196,9 @@ def main():
             tol=extra_args.eps_tol,
             verbose=True,
             n_jobs=extra_args.n_jobs,
+            method=extra_args.method,
+            lp_solver=extra_args.lp_solver,
+            action_order=not extra_args.no_action_order,
         )
         epsilon_min = result_eps['epsilon_min']
         R_final = result_eps['R_final']

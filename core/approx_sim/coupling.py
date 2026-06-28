@@ -13,7 +13,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def check_coupling(c1, V2, succ1_ids, succ2_ids, R_local, epsilon, tol=1e-8):
+def check_coupling(c1, V2, succ1_ids, succ2_ids, R_local, epsilon, tol=1e-8, solver=None):
     """
     Check whether coupling (W, beta) exists per Definition 5.
 
@@ -128,7 +128,7 @@ def check_coupling(c1, V2, succ1_ids, succ2_ids, R_local, epsilon, tol=1e-8):
     prob = cp.Problem(cp.Minimize(cp.sum(beta)), constraints)
 
     try:
-        prob.solve(verbose=False)
+        prob.solve(verbose=False, solver=solver)
     except cp.error.SolverError as e:
         logger.debug('CVXPY solver error: %s', e)
         return {
@@ -192,3 +192,123 @@ def build_local_relation(succ1_ids, succ2_ids, R_full):
                 coarse_has_r[j] = True
 
     return r_idx, fine_has_r, coarse_has_r
+
+
+def check_coupling_max_mass(c1, V2, succ1_ids, succ2_ids, R_local, epsilon,
+                            tol=1e-8, solver=None):
+    """Check coupling feasibility AND return dual variables for separation LP.
+
+    Same constraints as check_coupling, but objective is to MAXIMIZE the
+    coupling mass Σ_{(i,j)∈R} W[i,j].  Returns dual variables α from the
+    fine marginal constraints, which are used by the lazy enumeration's
+    separation LP.
+
+    :return: dict with feasible, max_mass, dual_alpha, solve_time, status, ...
+    """
+    import cvxpy as cp
+
+    t0 = time.time()
+
+    if epsilon >= 1.0 - tol:
+        return {
+            'feasible': True, 'max_mass': 1.0,
+            'dual_alpha': np.zeros(len(c1)),
+            'solve_time': 0.0, 'status': 'trivial_eps_one',
+        }
+
+    k1 = len(c1)
+    k2 = len(V2[0]) if V2 else 0
+    L = len(V2)
+
+    # Build R index set and pre-filter
+    r_idx = set()
+    fine_has_r = [False] * k1
+    for i in range(k1):
+        s1 = int(succ1_ids[i])
+        for j in range(k2):
+            s2 = int(succ2_ids[j])
+            if (s1, s2) in R_local:
+                r_idx.add((i, j))
+                fine_has_r[i] = True
+
+    uncoupled_mass = float(sum(c1[i] for i in range(k1) if not fine_has_r[i]))
+    if uncoupled_mass > epsilon + tol:
+        return {
+            'feasible': False, 'max_mass': uncoupled_mass,
+            'dual_alpha': None, 'solve_time': time.time() - t0,
+            'status': 'prefilter_failed',
+        }
+
+    if L == 0:
+        feasible = k1 == 0 or epsilon >= 1.0 - tol
+        return {
+            'feasible': feasible, 'max_mass': 0.0 if not feasible else 1.0,
+            'dual_alpha': None, 'solve_time': time.time() - t0,
+            'status': 'no_coarse_corners',
+        }
+
+    # Build LP: maximize Σ_{(i,j)∈R} W[i,j]
+    V2_mat = np.array(V2)
+    W = cp.Variable((k1, k2))
+    beta = cp.Variable(L)
+
+    constraints = [
+        cp.sum(beta) == 1,
+        beta >= 0,
+        W >= 0,
+    ]
+    # Fine marginals (store constraint objects for dual extraction)
+    fine_cons = []
+    for i in range(k1):
+        cons = (cp.sum(W[i, :]) == c1[i])
+        constraints.append(cons)
+        fine_cons.append(cons)
+
+    # Coarse marginals
+    coarse_dist = beta @ V2_mat
+    constraints.append(cp.sum(W, axis=0) == coarse_dist)
+
+    # Objective: maximize mass in R
+    if r_idx:
+        r_entries = [W[i, j] for (i, j) in r_idx]
+        obj = cp.Maximize(r_entries[0] if len(r_entries) == 1
+                          else cp.sum(cp.hstack(r_entries)))
+    else:
+        obj = cp.Maximize(cp.Constant(0))
+
+    prob = cp.Problem(obj, constraints)
+
+    try:
+        prob.solve(verbose=False, solver=solver)
+    except cp.error.SolverError as e:
+        logger.debug('CVXPY max-mass solver error: %s', e)
+        return {
+            'feasible': False, 'max_mass': 0.0,
+            'dual_alpha': None,
+            'solve_time': time.time() - t0, 'status': 'solver_error',
+        }
+
+    solve_time = time.time() - t0
+
+    feasible = prob.status in ('optimal', 'optimal_inaccurate')
+    max_mass = prob.value if prob.value is not None else 0.0
+
+    # Extract dual variables from fine marginal constraints
+    dual_alpha = np.zeros(k1)
+    if feasible:
+        for i, cons in enumerate(fine_cons):
+            dv = cons.dual_value
+            dual_alpha[i] = float(dv) if dv is not None else 0.0
+
+    # Check if max_mass >= 1 - epsilon
+    if feasible:
+        feasible = max_mass >= 1.0 - epsilon - tol
+
+    return {
+        'feasible': feasible,
+        'max_mass': max_mass,
+        'dual_alpha': dual_alpha,
+        'solve_time': solve_time,
+        'status': prob.status,
+        'n_r_pairs': len(r_idx),
+    }
