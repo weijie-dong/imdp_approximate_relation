@@ -200,6 +200,10 @@ def cmd_pair(config_path, name, step_only=0):
             '--n_jobs', str(c.get('n_jobs', -1)),
             '--seed', str(c.get('seed', 42)),
         ]
+        if c.get('method'):
+            step2_args.extend(['--method', c['method']])
+        if c.get('lp_solver'):
+            step2_args.extend(['--lp_solver', c['lp_solver']])
         times[2] = run_step(2, STEPS_DIR / 'step2_epsilon_search.py', step2_args)
 
     # ---- Step 3: Validate ----
