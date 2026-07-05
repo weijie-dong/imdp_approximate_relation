@@ -177,6 +177,68 @@ Do not modify any files under `core/`. Reuse `build_toy_imdp` from `verify_paper
 
 ---
 
+## 7. Reproduction Steps
+
+### Prerequisites
+
+```bash
+conda activate dyabstract
+cd D:/transfer/ing/imdp/example/code/imdp-synthesis
+git pull  # ensure latest fixes (commit c2d7143+)
+```
+
+### Test A: Toy Example (3-state, ~1 second)
+
+```bash
+python verify_toy_example.py
+```
+
+Expected output:
+```
+Experiment 1: Data Structure Validation → ALL PASS
+Experiment 2: ε=0 → (p1,p2) FAILED a2=[1]; ε=0.2 → all pass
+Experiment 3: ε_min = 0.200012 (both lazy and corner)
+COMPARISON: ✓ PASS — corner and lazy produce identical results
+```
+
+### Test B: Scalable Test1D (lazy only, ~1-2 minutes total)
+
+```bash
+# Default: 15→5 (S level)
+python benchmarks/scalable_test.py 15 5
+
+# Medium: 21→7
+python benchmarks/scalable_test.py 21 7
+
+# Large: 35→7 (lazy only recommended; corner takes >15min)
+python benchmarks/scalable_test.py 35 7
+
+# X-Large: 51→17 (lazy only; corner unrunnable)
+python -c "
+import sys; sys.path.insert(0, '.')
+# See doc_en/running_example/scalable_test_record.md for full inline script
+# or run: python benchmarks/scalable_test.py 51 17
+# (skip corner method by editing the method list to ['lazy'] only)
+"
+```
+
+Expected behavior:
+- ε_min is never 1.0 (bug fixed ✓)
+- Lazy = Corner at all testable resolutions
+- LP reduction ratio grows with k1 (7x → 12x → 30x+)
+
+### Test C: Compare All Methods
+
+```bash
+python compare_methods.py
+```
+
+---
+
+## 8. Experiment Records
+
+---
+
 ## 6. Verification Checklist
 
 1. ε_min(lazy) ≈ ε_min(corner) ≈ 0.2

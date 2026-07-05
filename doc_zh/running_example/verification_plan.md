@@ -177,6 +177,63 @@ def build_M2():
 
 ---
 
+## 7. 复现步骤
+
+### 环境准备
+
+```bash
+conda activate dyabstract
+cd D:/transfer/ing/imdp/example/code/imdp-synthesis
+git pull  # 确保包含最新修复 (commit c2d7143+)
+```
+
+### 测试 A: Toy Example 手工小案例（3 状态，~1 秒）
+
+```bash
+python verify_toy_example.py
+```
+
+预期输出：
+```
+Experiment 1: Data Structure Validation → ALL PASS
+Experiment 2: ε=0 → (p1,p2) FAILED a2=[1]; ε=0.2 → all pass
+Experiment 3: ε_min = 0.200012 (lazy 和 corner 一致)
+COMPARISON: ✓ PASS
+```
+
+### 测试 B: Scalable Test1D 规模测试（lazy only，~1-2 分钟）
+
+```bash
+# S 级别: 15→5
+python benchmarks/scalable_test.py 15 5
+
+# M 级别: 21→7
+python benchmarks/scalable_test.py 21 7
+
+# L 级别: 35→7（仅 lazy，corner 需 >15min）
+python benchmarks/scalable_test.py 35 7
+
+# XL 级别: 51→17（仅 lazy，corner 不可运行）
+# 见 doc_en/running_example/scalable_test_record.md 中的内联脚本
+```
+
+预期行为：
+- ε_min 从不等于 1.0（bug 已修复 ✓）
+- 所有可测试分辨率下 Lazy = Corner
+- LP 减少比随 k1 增长（7x → 12x → 30x+）
+
+### 测试 C: 三方法对比
+
+```bash
+python compare_methods.py
+```
+
+---
+
+## 8. 实验记录
+
+---
+
 ## 6. 验证检查清单
 
 1. ε_min(lazy) ≈ ε_min(corner) ≈ 0.2
