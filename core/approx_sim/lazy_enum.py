@@ -208,13 +208,23 @@ def check_coupling_lazy(pl1, pu1, corners2, succ1, succ2, R_local, epsilon,
     c_init = _generate_initial_corner(pl1, pu1, fine_has_r)
     pending.append(c_init)
 
-    # Track the tightest dual vars across all checked feasible corners
+    # Track dual vars from ALL checked feasible corners.
+    # The separation LP (min p^T α) uses the dual α from the corner with the
+    # LOWEST max_mass — that corner's dual gives the tightest upper bound on
+    # M(p) for untested corners p.
+    dual_history = []               # list of (dual_alpha, max_mass) for each feasible corner
     best_dual_alpha = None
-    best_max_mass = -np.inf
+    best_max_mass = np.inf          # track LOWEST max_mass (tightest bound)
 
-    for iteration in range(max_iter):
+    # Adaptive max_iter: scale with k1 to handle large successor sets
+    effective_max_iter = max(max_iter, k1 * 3)
+
+    for iteration in range(effective_max_iter):
         if not pending:
-            # No more corners to check — try separation LP with best dual vars
+            # No more corners queued — try separation LP with the best
+            # (tightest) dual vars found so far.  If it returns a known
+            # corner, we have converged: no unchecked corner can violate
+            # the coupling constraint.
             if best_dual_alpha is not None:
                 c_sep = _solve_separation_lp(pl1, pu1, best_dual_alpha)
                 key = _corner_key(c_sep)
@@ -223,7 +233,9 @@ def check_coupling_lazy(pl1, pu1, corners2, succ1, succ2, R_local, epsilon,
                 else:
                     break  # Converged: separation returns known corner
             else:
-                break  # No dual vars available (shouldn't happen)
+                # No feasible corners checked yet — try separation with
+                # the last corner's dual vars (shouldn't normally happen)
+                break
 
         if not pending:
             break
@@ -249,26 +261,44 @@ def check_coupling_lazy(pl1, pu1, corners2, succ1, succ2, R_local, epsilon,
                 'wall_time': time.time() - t_start,
             }
 
-        # Corner passed — update best dual vars
-        if result['max_mass'] > best_max_mass or best_dual_alpha is None:
-            # Use dual vars from the corner with LOWEST max_mass (tightest)
-            pass
+        # Corner passed — store dual vars and track tightest (lowest max_mass)
         if result['dual_alpha'] is not None:
-            # Generate next candidate from this corner's dual vars
+            dual_history.append((result['dual_alpha'].copy(), result['max_mass']))
+
+            # Track the corner with LOWEST max_mass — its dual gives the
+            # tightest upper bound on M(p) for separation.
+            if result['max_mass'] < best_max_mass:
+                best_max_mass = result['max_mass']
+                best_dual_alpha = result['dual_alpha'].copy()
+
+            # Standard separation: find corner minimizing p^T α
             c_sep = _solve_separation_lp(pl1, pu1, result['dual_alpha'])
             sep_key = _corner_key(c_sep)
             if sep_key not in checked:
                 pending.append(c_sep)
-            # Also generate with the "anti" dual for coverage
-            c_sep2 = _solve_separation_lp(pl1, pu1, -result['dual_alpha'])
-            sep_key2 = _corner_key(c_sep2)
-            if sep_key2 not in checked:
-                pending.append(c_sep2)
+
+            # Also try separation with the best (tightest) dual vars if
+            # they differ from the current corner's dual.  This ensures
+            # we don't miss violations detectable only by tighter bounds.
+            if best_dual_alpha is not None and not np.allclose(
+                result['dual_alpha'], best_dual_alpha, rtol=1e-8, atol=1e-10
+            ):
+                c_sep_best = _solve_separation_lp(pl1, pu1, best_dual_alpha)
+                sep_key_best = _corner_key(c_sep_best)
+                if sep_key_best not in checked:
+                    pending.append(c_sep_best)
 
     # Out of iterations or converged
+    status = 'converged' if iteration < effective_max_iter - 1 else 'max_iter'
+    if status == 'max_iter':
+        logger.warning(
+            'check_coupling_lazy: reached max_iter=%d (k1=%d, checked=%d corners) '
+            'without converging — result may be incorrect (false feasible)',
+            effective_max_iter, k1, len(checked),
+        )
     return {
         'feasible': True, 'lp_calls': lp_calls, 'lp_time': lp_time,
-        'n_corners_checked': len(checked), 'status': 'converged',
+        'n_corners_checked': len(checked), 'status': status,
         'wall_time': time.time() - t_start,
         'iterations': iteration + 1,
     }

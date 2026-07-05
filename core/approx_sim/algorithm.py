@@ -110,12 +110,17 @@ def compute_approx_sim(
     P2 = imdp2.P_full
     S2 = imdp2.S_id
 
-    # ------ thread-safe corner cache ------
+    # ------ thread-safe corner / bounds cache ------
     _cache = {}
     _cache_lock = threading.Lock()
 
     def _get_corners(imdp_id, s, a):
-        """Thread-safe lazy corner lookup returning (verts, succ_ids, P_lower, P_upper)."""
+        """Thread-safe lazy corner lookup returning (verts, succ_ids, P_lower, P_upper).
+
+        For the 'corner' method this enumerates all vertices of the interval
+        simplex, which is O(2^(k-1)).  The 'lazy' and 'dual' methods do NOT
+        need the full vertex list — use _get_bounds() for those.
+        """
         key = (imdp_id, s, a)
         if key in _cache:
             return _cache[key]
@@ -126,6 +131,27 @@ def compute_approx_sim(
                 verts = enumerate_corners(pl, pu)
                 _cache[key] = (verts, succ, pl, pu)
         return _cache[key]
+
+    # Separate cache for bounds-only lookups (lazy/dual methods).
+    # These are much cheaper — no O(2^k) corner enumeration.
+    _bounds_cache = {}
+
+    def _get_bounds(imdp_id, s, a):
+        """Thread-safe bounds lookup returning (succ_ids, P_lower, P_upper).
+
+        Unlike _get_corners, this does NOT enumerate corner vertices.
+        Used by the 'lazy' and 'dual' methods which only need the interval
+        endpoints, not the full vertex set.
+        """
+        key = (imdp_id, s, a)
+        if key in _bounds_cache:
+            return _bounds_cache[key]
+        with _cache_lock:
+            if key not in _bounds_cache:
+                _imdp = imdp1 if imdp_id == 1 else imdp2
+                succ, pl, pu = get_successor_info(_imdp, s, a)
+                _bounds_cache[key] = (succ, pl, pu)
+        return _bounds_cache[key]
 
     # ------ per-pair check function (runs in worker threads) ------
     _profile_lock = threading.Lock()
@@ -146,8 +172,8 @@ def compute_approx_sim(
         prefilter_skipped = 0
         _corner_time = 0.0
 
-        num_a2 = P2[s2].shape[0] if s2 in P2 else 0
-        num_a1 = P1[s1].shape[0] if s1 in P1 else 0
+        num_a2 = P2[s2].shape[0] if s2 < len(P2) else 0
+        num_a1 = P1[s1].shape[0] if s1 < len(P1) else 0
 
         for a2_pos in range(num_a2):
             t0 = time.time()
@@ -178,10 +204,17 @@ def compute_approx_sim(
                 a1_order = list(range(num_a1))
             for a1_pos in a1_order:
                 t0 = time.time()
-                corners1, succ1, pl1, pu1 = _get_corners(1, s1, a1_pos)
+                if method in ('lazy', 'dual'):
+                    # Lazy/dual methods only need interval bounds, not the
+                    # full corner vertex set.  Skipping O(2^k1) enumeration
+                    # is a major performance win for large successor sets.
+                    succ1, pl1, pu1 = _get_bounds(1, s1, a1_pos)
+                    corners1 = None
+                else:
+                    corners1, succ1, pl1, pu1 = _get_corners(1, s1, a1_pos)
                 _corner_time += time.time() - t0
 
-                if not corners1:
+                if len(succ1) == 0:
                     continue
 
                 # --- action pre-filter ---
@@ -246,8 +279,9 @@ def compute_approx_sim(
             _profile['lp_time'] += lp_time
             _profile['lp_count'] += lp_calls
             _profile['n_checked'] += 1
-            if len(corners1) > _profile['max_corners']:
-                _profile['max_corners'] = len(corners1)
+            n_c1 = len(corners1) if corners1 is not None else 0
+            if n_c1 > _profile['max_corners']:
+                _profile['max_corners'] = n_c1
                 _profile['max_k1'] = len(succ1)
 
         return (None, lp_calls, lp_time, prefilter_skipped)

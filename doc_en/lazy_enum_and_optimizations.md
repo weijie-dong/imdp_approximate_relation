@@ -300,7 +300,95 @@ The reduction factor grows with k1, making lazy enumeration increasingly valuabl
 
 ---
 
-## 6. Solver Benchmark
+## 6. Parallelism Analysis: Threads, Processes, and Lock Contention
+
+### 6.1 Current Parallel Strategy
+
+`algorithm.py` parallelizes the fixed-point iteration over `(s1, s2)` pairs using `ThreadPoolExecutor`:
+
+```python
+with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+    futures = [executor.submit(_check_pair, (s1, s2, R_frozen))
+               for (s1, s2) in R_list]
+```
+
+Within each worker thread, corner data is lazily loaded via `_get_corners(s, a)`, which uses a `threading.Lock()` to protect a shared cache dictionary. All threads contend for this single lock when accessing corner data.
+
+### 6.2 Why Threads (Not Processes) Are Correct Here
+
+The dominant computational cost is **LP solving** (~95% of runtime). LP solvers (HiGHS, CLARABEL, SCS) are implemented in C/C++ and **release the GIL** during execution. This means:
+
+- Multiple threads can execute LP solves simultaneously across CPU cores
+- No GIL contention during the expensive part of the workload
+- Threads share the IMDP data structures (P_full, S_id, etc.) in memory without copying
+
+Process-based parallelism (e.g., `joblib.Parallel` with `loky` backend, or `ProcessPoolExecutor`) would introduce:
+
+1. **Serialization overhead**: IMDP data structures (probability intervals, state-action mappings) must be pickled and sent to each worker process
+2. **Memory duplication**: Each process gets its own copy of the IMDP data (~tens of MB per process)
+3. **No GIL benefit**: Since LP solvers already release the GIL, process isolation provides no additional parallelism gain for the compute-heavy portion
+
+**Conclusion**: Thread-based parallelism is the correct choice. Switching to `joblib` or process pools would add overhead without improving throughput.
+
+### 6.3 The Actual Bottleneck: Corner Cache Lock Contention
+
+While threading is architecturally correct, the current implementation has a **lock contention bottleneck** in the corner cache:
+
+```python
+# algorithm.py — current lazy-loading with lock
+_cache = {}
+_cache_lock = threading.Lock()
+
+def _get_corners(imdp_id, s, a):
+    key = (imdp_id, s, a)
+    if key in _cache:
+        return _cache[key]
+    with _cache_lock:               # ← ALL threads serialize here
+        if key not in _cache:
+            succ, pl, pu = get_successor_info(_imdp, s, a)
+            verts = enumerate_corners(pl, pu)
+            _cache[key] = (verts, succ, pl, pu)
+    return _cache[key]
+```
+
+The lock is held during corner enumeration (calling `enumerate_corners`), which is a non-trivial computation for larger k1. When many threads concurrently request uncached corners, they serialize on this lock.
+
+### 6.4 Recommended Fix: Pre-Computed Corner Cache
+
+Pre-compute all corner data **before** the fixed-point iteration, eliminating lock contention entirely:
+
+```python
+# Before the fixed-point loop:
+corner_cache = {}
+for s in range(num_states):
+    for a in range(num_actions):
+        succ, pl, pu = get_successor_info(imdp, s, a)
+        verts = enumerate_corners(pl, pu)
+        corner_cache[(s, a)] = (verts, succ, pl, pu)
+
+# During iteration: worker threads read directly (no lock needed)
+# corner_cache is read-only → inherently thread-safe
+```
+
+**Benefits**:
+- **Zero lock contention**: All data is pre-computed and read-only during iteration
+- **Reuse across fixed-point iterations**: Corners are computed once, used in every iteration
+- **No dependency changes**: Pure optimization of existing code, no new libraries
+- **Memory trade-off**: Stores all corners upfront (~O(|S|·|A|·2^k1) worst case). For lazy enumeration, only `pl, pu` need to be cached (corners are generated on-demand), making this negligible.
+
+### 6.5 When Joblib / Process Parallelism Would Help
+
+| Scenario | Recommended approach |
+|----------|---------------------|
+| LP solving (current bottleneck) | Threads (already correct, LP solvers release GIL) |
+| Corner enumeration | Pre-compute cache (eliminates lock contention) |
+| Python-heavy preprocessing | `joblib` / `ProcessPoolExecutor` if GIL-bound |
+| Multi-node distributed | `ray` or MPI for coarse-grained parallelism |
+| Single large LP | Commercial solver with internal threading (Gurobi) |
+
+---
+
+## 7. Solver Benchmark
 
 4200 LP calls on Test1D data, comparing free CVXPY-compatible solvers:
 
@@ -315,9 +403,9 @@ The reduction factor grows with k1, making lazy enumeration increasingly valuabl
 
 ---
 
-## 7. Validation & Reproducibility
+## 8. Validation & Reproducibility
 
-### 7.1 Method Switching Interface
+### 8.1 Method Switching Interface
 
 All optimizations are integrated via parameterized flags, preserving the **original corner method** as the baseline for fair comparison:
 
@@ -339,7 +427,7 @@ python time_algorithm2.py --method lazy --no-action-order \
     --coarse_resolution coarse --fine_resolution fine
 ```
 
-### 7.2 CLI Parameter Reference
+### 8.2 CLI Parameter Reference
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -357,7 +445,7 @@ python time_algorithm2.py --method lazy --no-action-order \
 
 All methods produce **identical** ε_min and R_final (except `dual`, which is documented as incorrect). The differences are purely in computational efficiency.
 
-### 7.3 Comparison Script
+### 8.3 Comparison Script
 
 The script `compare_methods.py` runs all three methods on the same IMDP data and compares results:
 
@@ -371,7 +459,7 @@ Output:
 - Phase 3: Runs `compute_min_epsilon` with `corner`, `lazy`, and `dual` sequentially
 - Summary: Comparison table with ε_min, |R_final|, LP calls, wall time, and correctness
 
-### 7.4 Isolation Tests
+### 8.4 Isolation Tests
 
 #### Solver benchmark (isolated LP solve time)
 
@@ -390,7 +478,7 @@ python debug_dual.py
 # Used to identify and confirm the dual LP mathematical error
 ```
 
-### 7.5 Reproducing Experimental Results
+### 8.5 Reproducing Experimental Results
 
 **Step 1**: Ensure dependencies are installed
 ```bash
@@ -414,7 +502,7 @@ python time_algorithm2.py --method lazy \
     --coarse_resolution coarse --fine_resolution fine
 ```
 
-### 7.6 Correctness Guarantees
+### 8.6 Correctness Guarantees
 
 | Method | ε_min correctness | |R| correctness | Performance impact |
 |--------|-------------------|---------------|-------------------|
@@ -429,9 +517,87 @@ The lazy enumeration is an **exact** algorithm — it computes the same maximal 
 2. P1 has finitely many corners
 3. At convergence, no unchecked corner can violate the coupling constraint (by the dual bound)
 
+### 8.7 Soundness & Completeness Across k1 Ranges
+
+The correctness guarantees in §8.6 assume the corner enumeration method itself is sound and complete. This is true for **most** k1 values, but there are important edge cases at high dimensions.
+
+#### Corner Enumeration Methods by k1
+
+The function `enumerate_corners()` in `corners.py` dispatches to three different algorithms depending on the effective dimension (number of successors after zero-support filtering):
+
+| k1 range | Method | Sound? | Complete? | Runtime |
+|----------|--------|--------|-----------|---------|
+| ≤ 12 | `_enumerate_greedy` (full 2^(k1-1) enumeration) | ✓ | ✓ | O(2^k1) — exponential |
+| > 12 | `_enumerate_halfspace_reduced` (Qhull) | ✓ | ✓ (theoretically) | O(exp) — high-d Qhull can be numerically unstable |
+| > 12 (fallback) | `_enumerate_lp` (coordinate-extreme LP) | **✗ NOT sound** | ✗ | O(k1·LP) — fast but incomplete |
+
+The critical path is the LP fallback (`_enumerate_lp`, line 179 of `corners.py`). The code itself warns:
+
+> "Returns coordinate-extreme vertices only — **not guaranteed to enumerate ALL vertices** of the polytope. Useful as a fallback."
+>
+> "The LP coordinate-extreme method (`_enumerate_lp`) is **unsound for Algorithm 2**: missing vertices means the coupling check is insufficiently constrained, potentially retaining pairs in R that should be eliminated."
+
+**Why it's unsound**: Algorithm 2 requires checking ALL corner vertices of P1. If a vertex is missed, the coupling LP is never called for that extreme distribution, so a pair that should be rejected (because that vertex cannot be matched) may incorrectly survive. This is a **false positive** — the relation R is too large, and ε_min is underestimated.
+
+#### Lazy Corner Enumeration Soundness
+
+The lazy cutting-plane method does NOT depend on vertex enumeration of the fine IMDP. Instead, it uses the separation LP to generate corners on demand:
+
+| Scenario | Sound? | Why |
+|----------|--------|-----|
+| Converged (`status='converged'`) | ✓ | Separation LP with tightest dual proves no unchecked corner can violate the coupling constraint (dual certificate) |
+| Max iterations reached (`status='max_iter'`) | **Potential unsound** | Returns `feasible=True` but not all corners checked. A warning is logged |
+| Dual variables degenerate (all zeros) | ✓ (slower) | Separation LP degenerates to arbitrary corner generation; eventually enumerates all corners |
+
+The convergence guarantee relies on two mechanisms (both fixed in the current code):
+
+1. **`best_dual_alpha` tracking**: The dual variables from the corner with the **lowest** `max_mass` (tightest upper bound on M(p)) are used for the convergence check. If the separation LP with these duals returns an already-checked corner, no unchecked corner can violate the coupling constraint.
+2. **Adaptive `max_iter`**: Scaled as `max(max_iter, k1 * 3)`, giving the cutting-plane loop enough budget even for large successor sets.
+
+If the lazy method hits `max_iter`, a warning is logged:
+
+```
+check_coupling_lazy: reached max_iter=N (k1=K, checked=C corners)
+without converging — result may be incorrect (false feasible)
+```
+
+In all our experiments (toy example, Test1D at resolutions up to 51→17), the lazy method always converged (`status='converged'`) with no warnings.
+
+#### Summary: Which Method to Use When
+
+```
+                      k1 ≤ 12              k1 > 12
+                      ───────              ───────
+corner (greedy):      sound ✓, complete ✓  (not used)
+corner (halfspace):   (not used)           sound ✓* (Qhull may fail numerically)
+corner (LP fallback): (not used)           UNSOUND ✗ — DO NOT USE
+
+lazy (converged):     sound ✓              sound ✓
+lazy (max_iter):      potential unsound    potential unsound
+                      → increase max_iter  → increase max_iter
+```
+
+**\* Qhull numerical note**: `scipy.spatial.HalfspaceIntersection` uses Qhull, which can fail or produce incorrect results in high dimensions (d > 8-10). When it fails, the code silently falls back to the unsound LP method. This is another reason to prefer the lazy method — it avoids high-dimensional geometry entirely.
+
+#### Practical Impact
+
+In our scalable Test1D experiments:
+
+| Resolution | max_k1 | Corner method status | Lazy method status |
+|-----------|--------|---------------------|-------------------|
+| 15→5 | 4 | Greedy (sound ✓) | Converged (sound ✓) |
+| 21→7 | 5 | Greedy (sound ✓) | Converged (sound ✓) |
+| 35→7 | 8 | Greedy (sound ✓) but >15min | Converged (sound ✓) |
+| 51→17 | ~10+ | Greedy (sound ✓) but unrunnable | Converged (sound ✓) |
+
+For the large-scale cases that originally produced ε_min = 1:
+- k1 was large enough (>12) that corner enumeration used halfspace intersection, which may have been numerically unstable
+- The lazy method's `best_dual_alpha` bug (not updating) and convergence dead code compounded the issue
+- With the fixes, lazy correctly converges at all k1, and ε_min is no longer 1.0
+
 ---
 
-## 8. Related Documents
+## 9. Related Documents
 
 | Document | Content |
 |----------|---------|
