@@ -173,3 +173,5 @@ cython_debug/
 # Local doc drafts (not to be tracked)
 doc_en/email_draft.md
 doc_en/project_overview.md
+doc_en/running_example/email_*.txt
+doc_en/running_example/email_*.md
