@@ -60,11 +60,11 @@ def build_test_imdp(args, n_cells, label):
     return model, partition, imdp
 
 
-def run_comparison():
+def run_comparison(n_fine=15, n_coarse=5):
     """Run epsilon search with both methods and compare results."""
     print('=' * 70)
     print('IMDP Approximate Simulation — Method Comparison')
-    print('  Test1D model: 5-state coarse vs 15-state fine')
+    print(f'  Test1D model: {n_coarse}-state coarse vs {n_fine}-state fine')
     print('=' * 70)
 
     # ---- Setup ----
@@ -81,8 +81,8 @@ def run_comparison():
     print('\n--- Phase 1: Building IMDPs (shared) ---')
     t_phase = time.time()
 
-    model_fine, part_fine, imdp_fine = build_test_imdp(args, n_cells=15, label='Fine')
-    model_coarse, part_coarse, imdp_coarse = build_test_imdp(args, n_cells=5, label='Coarse')
+    model_fine, part_fine, imdp_fine = build_test_imdp(args, n_cells=n_fine, label='Fine')
+    model_coarse, part_coarse, imdp_coarse = build_test_imdp(args, n_cells=n_coarse, label='Coarse')
 
     build_time = time.time() - t_phase
     print(f'  Build total: {build_time:.1f}s')
@@ -96,8 +96,11 @@ def run_comparison():
           f'labels consistent: {label_result["consistent"]}')
 
     # ---- Phase 3: Compare methods ----
+    # 'corner' = sound exact baseline; 'tiered' = sound+complete acceleration
+    # (must match corner on epsilon_min / |R|).  'lazy' (unsound) and 'dual'
+    # (known-wrong) are skipped here to keep the bug-check focused.
     results = {}
-    for method in ['corner', 'lazy', 'dual']:
+    for method in ['corner', 'tiered']:
         print(f'\n{"=" * 70}')
         print(f'Running method = "{method}"')
         print(f'{"=" * 70}')
@@ -140,7 +143,7 @@ def run_comparison():
     print('\n' + '=' * 70)
     print('COMPARISON SUMMARY')
     print('=' * 70)
-    methods = [m for m in ['corner', 'lazy', 'dual'] if m in results]
+    methods = [m for m in ['corner', 'tiered'] if m in results]
     header = f'  {"Metric":<25s}'
     for m in methods:
         header += f'  {m:>15s}'
@@ -160,26 +163,53 @@ def run_comparison():
                 line += f'  {val:15d}'
         print(line)
 
-    # Compare corner vs lazy
-    if 'lazy' in results:
-        rc = results['corner']
-        rl = results['lazy']
-        if rc['epsilon_min'] == rl['epsilon_min'] and rc['|R_final|'] == rl['|R_final|']:
-            print(f'\n  [PASS] corner vs lazy: results MATCH')
-        else:
-            print(f'\n  [FAIL] corner vs lazy: results DIFFER')
-        if rl['wall_time'] > 0:
-            print(f'  Lazy speedup vs corner: {rc["wall_time"]/rl["wall_time"]:.1f}x')
-            print(f'  LP call reduction:      {rc["total_lp_calls"]/max(rl["total_lp_calls"],1):.1f}x '
-                  f'({rc["total_lp_calls"]} -> {rl["total_lp_calls"]})')
+    # ---- corner vs tiered: exactness check (must match) ----
+    if 'corner' in results and 'tiered' in results:
+        rc, rt = results['corner'], results['tiered']
+        eps_match = abs(rc['epsilon_min'] - rt['epsilon_min']) <= 1e-4
+        r_match = rc['|R_final|'] == rt['|R_final|']
 
-    # For dual, note it's known to be wrong
-    if 'dual' in results:
-        print(f'\n  [KNOWN] dual method is mathematically incorrect (see dual_lp_implementation_plan.md)')
+        print('\n  --- corner vs tiered (exactness) ---')
+        rcR, rtR = rc['|R_final|'], rt['|R_final|']
+        print(f'  epsilon_min:  corner={rc["epsilon_min"]:.6f}  '
+              f'tiered={rt["epsilon_min"]:.6f}  -> {"MATCH" if eps_match else "DIFFER"}')
+        print(f'  |R_final|:    corner={rcR:<8d}  '
+              f'tiered={rtR:<8d}  -> {"MATCH" if r_match else "DIFFER"}')
+
+        # per-iteration agreement (same epsilon search trajectory)
+        hc, ht = rc['history'], rt['history']
+        hist_match = len(hc) == len(ht)
+        mismatches = []
+        if hist_match:
+            for k, (hc_k, ht_k) in enumerate(zip(hc, ht)):
+                if (abs(hc_k['epsilon'] - ht_k['epsilon']) > 1e-9
+                        or hc_k['feasible'] != ht_k['feasible']
+                        or hc_k['n_pairs'] != ht_k['n_pairs']):
+                    mismatches.append(k)
+        print(f'  per-iteration trajectory: '
+              f'{"MATCH" if (hist_match and not mismatches) else "DIFFER"} '
+              f'({len(hc)} vs {len(ht)} iters, {len(mismatches)} mismatches)')
+        if mismatches:
+            for k in mismatches[:10]:
+                print(f'    iter {k}: corner(feas={hc[k]["feasible"]},|R|={hc[k]["n_pairs"]}) '
+                      f'vs tiered(feas={ht[k]["feasible"]},|R|={ht[k]["n_pairs"]}) '
+                      f'at eps={hc[k]["epsilon"]:.6f}')
+
+        overall = eps_match and r_match and hist_match and not mismatches
+        print(f'\n  [{"PASS" if overall else "FAIL"}] tiered == corner: '
+              f'{"exact match" if overall else "BUG DETECTED"}')
+        if rt['wall_time'] > 0:
+            print(f'  tiered speedup vs corner: {rc["wall_time"]/rt["wall_time"]:.2f}x')
+            print(f'  LP call reduction:        '
+                  f'{rc["total_lp_calls"]/max(rt["total_lp_calls"],1):.2f}x '
+                  f'({rc["total_lp_calls"]} -> {rt["total_lp_calls"]})')
 
     print('=' * 70)
     return results
 
 
 if __name__ == '__main__':
-    run_comparison()
+    import sys
+    _nf = int(sys.argv[1]) if len(sys.argv) > 1 else 15
+    _nc = int(sys.argv[2]) if len(sys.argv) > 2 else 5
+    run_comparison(n_fine=_nf, n_coarse=_nc)

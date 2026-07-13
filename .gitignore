@@ -11,6 +11,7 @@ __pycache__/
 
 # Tool caches
 .ruff_cache/
+.cache_imdps/
 
 # Generated docs
 docs/_build/

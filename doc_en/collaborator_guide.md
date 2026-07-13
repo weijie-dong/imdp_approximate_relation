@@ -1,5 +1,10 @@
 # Collaborator Quick Start
 
+> ⚠️ **Update (2026-07)**: `method='lazy'` is deprecated (unsound). Use `method='corner'` (exact) or
+> `method='tiered'` (sound acceleration). See [`UPDATE_lazy_to_tiered_EN.md`](UPDATE_lazy_to_tiered_EN.md).
+> The environment / pipeline / file-manifest parts of this guide are still valid; only the method
+> choice changed. Full doc index: [`README_EN.md`](README_EN.md).
+
 ## 1. Get the Code
 
 ```bash

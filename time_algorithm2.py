@@ -132,8 +132,9 @@ def main():
     parser.add_argument('--n_jobs', type=int, default=-1,
                         help='Number of parallel threads. -1 for all CPUs.')
     parser.add_argument('--method', type=str, default='corner',
-                        choices=['corner', 'dual', 'lazy'],
-                        help='LP method: corner (per-vertex) or dual (nested dual LP)')
+                        choices=['corner', 'dual', 'lazy', 'tiered'],
+                        help='LP method: corner (per-vertex), tiered (sound bounds+enum), '
+                             'dual (nested dual LP), lazy (cutting-plane, unsound)')
     parser.add_argument('--lp_solver', type=str, default='HIGHS',
                         help='CVXPY LP solver (default: HIGHS)')
     parser.add_argument('--no-action-order', action='store_true',

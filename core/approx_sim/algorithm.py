@@ -21,6 +21,7 @@ from tqdm import tqdm
 from .corners import enumerate_corners, get_successor_info
 from .coupling import check_coupling
 from .coupling_dual import check_coupling_dual
+from .coupling_tiered import check_coupling_tiered
 from .lazy_enum import check_coupling_lazy
 
 logger = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ def compute_approx_sim(
 
         for a2_pos in range(num_a2):
             t0 = time.time()
-            corners2, succ2, _, _ = _get_corners(2, s2, a2_pos)
+            corners2, succ2, pl2, pu2 = _get_corners(2, s2, a2_pos)
             _corner_time += time.time() - t0
 
             if not corners2:
@@ -204,8 +205,8 @@ def compute_approx_sim(
                 a1_order = list(range(num_a1))
             for a1_pos in a1_order:
                 t0 = time.time()
-                if method in ('lazy', 'dual'):
-                    # Lazy/dual methods only need interval bounds, not the
+                if method in ('lazy', 'dual', 'tiered'):
+                    # Lazy/dual/tiered methods only need interval bounds, not the
                     # full corner vertex set.  Skipping O(2^k1) enumeration
                     # is a major performance win for large successor sets.
                     succ1, pl1, pu1 = _get_bounds(1, s1, a1_pos)
@@ -247,6 +248,19 @@ def compute_approx_sim(
                     result = check_coupling_lazy(
                         pl1, pu1, corners2, succ1, succ2, R_frozen, epsilon,
                         solver=lp_solver,
+                    )
+                    lp_calls += result['lp_calls']
+                    lp_time += result['lp_time']
+                    all_ok = result['feasible']
+                elif method == 'tiered':
+                    # Sound + complete tiered check: LP-free UB/LB_min,
+                    # one-LP LB*, then exact corner enumeration fallback
+                    # (Tier 3 == corner baseline).  corners1 is enumerated
+                    # inside check_coupling_tiered only when the bounds
+                    # straddle 1-epsilon (the residual).
+                    result = check_coupling_tiered(
+                        pl1, pu1, succ1, pl2, pu2, succ2, corners2,
+                        R_frozen, epsilon, solver=lp_solver,
                     )
                     lp_calls += result['lp_calls']
                     lp_time += result['lp_time']

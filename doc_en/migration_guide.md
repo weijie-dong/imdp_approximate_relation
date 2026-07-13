@@ -1,5 +1,10 @@
 # Approximate Simulation Feature Migration Guide
 
+> ⚠️ **Update (2026-07)**: `method='lazy'` is deprecated (unsound). Use `method='corner'` (exact) or
+> `method='tiered'` (sound acceleration). See [`UPDATE_lazy_to_tiered_EN.md`](UPDATE_lazy_to_tiered_EN.md).
+> This guide's environment/file-manifest is still valid; only the method choice changed.
+> Full doc index: [`README_EN.md`](README_EN.md).
+
 This document describes how to port the IMDP approximate simulation feature to a fresh clone of the original project on another machine using a minimal file set.
 
 ## Prerequisites
