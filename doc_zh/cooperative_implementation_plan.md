@@ -33,6 +33,36 @@ Step 1–6 全部落码并通过 toy（论文 Example 1 / `new_running_example`�
 ε_min/计时。代码就绪，可在集群上跑 `--semantics cooperative --method {corner,tiered}` 取数填论文。
 competitive 已在 design.md §10–12 跑过同口径三方互证。
 
+## 1D Test1D 15→5 实测（2026-08-01，本地）
+
+脚本 `compare_methods_cooperative.py`（复用 `compare_methods.build_test_imdp` 在内存建 IMDP，跑
+cooperative corner+tiered + competitive corner 参考）。结果：
+
+**完备性（Cor. `cor:completeness`）在 1D 规模成立：**
+| | cooperative corner (FCE) | cooperative tiered (BCV) |
+|---|---|---|
+| ε_min | 0.000000 | 0.000000 |
+| \|R_final\| | 15 | 15 |
+| total LP | 1410 | 795 |
+| wall | 6.17s | 5.61s |
+
+逐 iter 轨迹 MATCH（2 vs 2，0 mismatch）→ **[PASS] cooperative tiered == corner**。
+tiered 比 corner：LP 1.77× 降、wall 1.10×（ε_min=0 全可行易体制，bounds 帮助有限）。
+
+**cooperative vs competitive（语义差异实证）：**
+| | cooperative (corner) | competitive (corner) |
+|---|---|---|
+| ε_min | **0.000000** | 0.000977 |
+| \|R\| | 15 | 15 |
+| wall | 6.17s | 43.29s |
+
+- cooperative 实现**精确模拟（ε=0）**，competitive 需 ε≈0.001 → `eps_min(coop) ≤ eps_min(comp)` ✓
+  （随机化响应扩大关系，cooperative 关系 ⊇ competitive 关系——论文 line 778 的 1D 实证）。
+- cooperative ~7× 快于 competitive（无 a2 循环、子对更少）。
+
+**结论**：cooperative 在 1D 上 sound+complete（BCV==FCE），且与 competitive 对照出预期的语义差异
+（ε 更小、更快）。2D 规模沿用 cluster-handoff。
+
 ---
 
 ## 0. 关键校正：cooperative ≠ "∀a1 ∃a2 找一个粗动作防御"
