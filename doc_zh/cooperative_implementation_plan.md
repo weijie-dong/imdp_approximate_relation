@@ -67,8 +67,6 @@ tiered 比 corner：LP 1.77× 降、wall 1.10×（ε_min=0 全可行易体制，
 
 ## 0. 关键校正：cooperative ≠ "∀a1 ∃a2 找一个粗动作防御"
 
-## 0. 关键校正：cooperative ≠ "∀a1 ∃a2 找一个粗动作防御"
-
 勘察初稿曾把 cooperative 当作 competitive 的内外循环对换（∀a1 ∃a2，找一个 coarse 动作当 defender）。**这与论文矛盾，必须按论文实现。**
 
 论文（Def `def:Coupling Constraint for Corners` line 1317、Thm `thm:IMDP-coupling-constraint` item(i)、§VI line 1790）明确：cooperative 的粗侧响应是**对所有 coarse 动作的随机化混合** ρ∈Dis(Γ2(x2))，化简为单一凸组合，顶点集
