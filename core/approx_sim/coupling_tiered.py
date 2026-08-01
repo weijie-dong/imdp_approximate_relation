@@ -199,3 +199,89 @@ def check_coupling_tiered(pl1, pu1, succ1, pl2, pu2, succ2, corners2,
             break
     return _result(all_ok, 'enum_feas' if all_ok else 'enum_infeas',
                    lp_calls, lp_time, t0, n_checked, n_corners_total)
+
+
+def check_coupling_tiered_coop(pl1, pu1, succ1, V_Q_mat, succ2, R_local,
+                               epsilon, tol=1e-8, solver=None):
+    """Sound + complete tiered cooperative check for one sub-pair (s1,a1,x2).
+
+    Cooperative twin of :func:`check_coupling_tiered`.  The coarse response is
+    the general polytope Q = conv(V_Q) with vertex superset ``V_Q_mat`` [L x k2]
+    (the union of all coarse-action corners, embedded in the common successor
+    space), so the LP-free Tier 1 bounds and the LB* LP use vertex enumeration
+    (Lemma polytope-ext) / ``q* = beta @ V_Q_mat`` instead of the box-simplex
+    closed form.  Tier 3 is byte-identical to the cooperative FCE path
+    (per-corner ``check_coupling(c1, V_Q_list, ...)``), so on the residual the
+    cooperative tiered answer equals cooperative FCE by construction.
+
+    :param pl1,pu1: np.array [k1] fine interval bounds (box-simplex P1(x1,a1))
+    :param succ1:   np.array [k1] fine successor state IDs
+    :param V_Q_mat: np.array [L, k2] coarse corner vertices (union superset)
+    :param succ2:   np.array [k2] coarse successor state IDs (the union space)
+    :param R_local: set of (s1_state, s2_state) int pairs
+    :param epsilon: float, approximation tolerance
+    :return: dict {feasible, decided_by, lp_calls, lp_time,
+                   n_corners_enum, n_corners_total, wall_time}
+    """
+    t0 = time.time()
+    k1 = len(pl1)
+    thr = 1.0 - epsilon
+    lp_calls = 0
+    lp_time = 0.0
+    n_corners_total = 0
+    V_Q_list = list(V_Q_mat)   # check_coupling expects a list of [k2] vectors
+
+    if epsilon >= 1.0 - tol:
+        return _result(True, 'trivial_eps_one', 0, 0.0, t0, 0, 0)
+
+    # ---- Tier 1: LP-free UB / LB_min (vertex enumeration) ----
+    b = cb.compute_bounds_lpfree_coop(pl1, pu1, succ1, V_Q_mat, succ2, R_local)
+    skipped = b.get('skipped', False)
+    if not skipped:
+        UB, LB_min = b['UB'], b['LB_min']
+        if UB is not None and UB < thr - tol:
+            return _result(False, 'ub_infeas', lp_calls, lp_time, t0, 0, 0)
+        if LB_min is not None and LB_min >= thr - tol:
+            return _result(True, 'lbmin_feas', lp_calls, lp_time, t0, 0, 0)
+
+    # ---- Tier 1.25 / 1.5: probe + LB* (only for small k1) ----
+    if k1 <= K_LBSTAR:
+        fine_has_r = [
+            any((int(succ1[i]), int(succ2[j])) in R_local
+                for j in range(len(succ2)))
+            for i in range(k1)
+        ]
+        c_probe = _hardest_corner(np.asarray(pl1, dtype=float),
+                                  np.asarray(pu1, dtype=float), fine_has_r)
+        r_probe = check_coupling(c_probe, V_Q_list, succ1, succ2, R_local,
+                                 epsilon, tol=tol, solver=solver)
+        lp_calls += 1
+        lp_time += r_probe.get('solve_time', 0.0)
+        if not r_probe['feasible']:
+            return _result(False, 'probe_infeas', lp_calls, lp_time, t0, 1, 1)
+
+        if not skipped:
+            t1 = time.time()
+            lbstar = cb.compute_lb_star_coop(pl1, pu1, succ1, V_Q_mat, succ2,
+                                             R_local, solver=solver)
+            lp_time += time.time() - t1
+            lp_calls += 1
+            if lbstar is not None and lbstar >= thr - tol:
+                return _result(True, 'lbstar_feas', lp_calls, lp_time, t0, 0, 0)
+
+    # ---- Tier 3: exact corner enumeration (== cooperative FCE) ----
+    corners1 = enumerate_corners(pl1, pu1)
+    n_corners_total = len(corners1)
+    all_ok = True
+    n_checked = 0
+    for c1 in corners1:
+        r = check_coupling(c1, V_Q_list, succ1, succ2, R_local, epsilon,
+                           tol=tol, solver=solver)
+        lp_calls += 1
+        lp_time += r.get('solve_time', 0.0)
+        n_checked += 1
+        if not r['feasible']:
+            all_ok = False
+            break
+    return _result(all_ok, 'enum_feas' if all_ok else 'enum_infeas',
+                   lp_calls, lp_time, t0, n_checked, n_corners_total)

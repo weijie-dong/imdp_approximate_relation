@@ -230,8 +230,11 @@ def check_coupling_tiered(pl1, pu1, succ1, pl2, pu2, succ2, corners2,
 ## 9. 范围外（明确）
 
 - 不做 Tier 2 / lazy 违例搜索（已决策去掉）。
-- 不做 cooperative（Algorithm 1）实现——本次只 competitive；running example 已选成对两种语义
-  都不平凡，将来补 cooperative 时同一微调例可直接用（coop ε_min≈0.1）。
+- ~~不做 cooperative（Algorithm 1）实现——本次只 competitive~~ **【2026-08-01 更新：已完成】**
+  cooperative（Algorithm 1 FCE + Algorithm 3 BCV）已实现并 toy 验证通过，见
+  `doc_zh/cooperative_implementation_plan.md` 与验证脚本
+  `doc_en/new_running_example/run_cooperative_validation.py`。本微调例 coop ε_min≈0.1 已复现。
+  引擎入口：`compute_approx_sim(..., semantics='cooperative')` / CLI `--semantics cooperative`。
 - 无新理论（已证）；不动 `lazy_enum.py` 的 shipped unsound 路径（仅留作未用，单独文档注记）。
 - Dubins3D（3D）不在本轮；2D DoubleIntegrator 为 case-study 目标。
 

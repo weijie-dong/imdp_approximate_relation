@@ -106,8 +106,13 @@ def main():
     parser.add_argument('--n_jobs', type=int, default=-1,
                         help='Number of parallel threads for Algorithm 2. -1 for all CPUs, 1 for sequential.')
     parser.add_argument('--method', type=str, default='corner',
-                        choices=['corner', 'dual', 'lazy'],
-                        help='LP method for Algorithm 2: corner (per-vertex) or dual (nested dual LP)')
+                        choices=['corner', 'dual', 'lazy', 'tiered'],
+                        help='LP method: corner (per-vertex), dual (nested dual LP), '
+                             'lazy (cutting-plane, unsound), or tiered (sound BCV)')
+    parser.add_argument('--semantics', type=str, default='competitive',
+                        choices=['competitive', 'cooperative'],
+                        help='Semantics: competitive (Algorithm 2, forall a2 exists a1) '
+                             'or cooperative (Algorithm 1, forall a1, randomized coarse response)')
     parser.add_argument('--lp_solver', type=str, default='HIGHS',
                         help='CVXPY LP solver (default: HIGHS)')
     parser.add_argument('--no-action-order', action='store_true',
@@ -199,6 +204,7 @@ def main():
             method=extra_args.method,
             lp_solver=extra_args.lp_solver,
             action_order=not extra_args.no_action_order,
+            semantics=extra_args.semantics,
         )
         epsilon_min = result_eps['epsilon_min']
         R_final = result_eps['R_final']

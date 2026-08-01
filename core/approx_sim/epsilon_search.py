@@ -29,6 +29,7 @@ def compute_min_epsilon(
     lp_solver='HIGHS',
     action_order=True,
     init_R=None,
+    semantics='competitive',
 ):
     """
     Binary search for the minimal ε such that the initial states are in the
@@ -89,7 +90,7 @@ def compute_min_epsilon(
 
     result_hi = compute_approx_sim(
         imdp1, imdp2, f2c_map, partition1, partition2,
-        epsilon=1.0, init_R=init_R, verbose=verbose, n_jobs=n_jobs, method=method, lp_solver=lp_solver, action_order=action_order,
+        epsilon=1.0, init_R=init_R, verbose=verbose, n_jobs=n_jobs, method=method, lp_solver=lp_solver, action_order=action_order, semantics=semantics,
     )
 
     if (s0_fine, s0_coarse) not in result_hi['R']:
@@ -116,7 +117,7 @@ def compute_min_epsilon(
 
     result_lo = compute_approx_sim(
         imdp1, imdp2, f2c_map, partition1, partition2,
-        epsilon=0.0, init_R=R_hi, verbose=verbose, n_jobs=n_jobs, method=method, lp_solver=lp_solver, action_order=action_order,
+        epsilon=0.0, init_R=R_hi, verbose=verbose, n_jobs=n_jobs, method=method, lp_solver=lp_solver, action_order=action_order, semantics=semantics,
     )
 
     history.append({
@@ -149,7 +150,7 @@ def compute_min_epsilon(
 
         result = compute_approx_sim(
             imdp1, imdp2, f2c_map, partition1, partition2,
-            epsilon=mid, init_R=R_hi, verbose=verbose, n_jobs=n_jobs, method=method, lp_solver=lp_solver, action_order=action_order,
+            epsilon=mid, init_R=R_hi, verbose=verbose, n_jobs=n_jobs, method=method, lp_solver=lp_solver, action_order=action_order, semantics=semantics,
         )
 
         feasible = (s0_fine, s0_coarse) in result['R']

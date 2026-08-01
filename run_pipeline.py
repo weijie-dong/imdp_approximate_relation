@@ -202,6 +202,8 @@ def cmd_pair(config_path, name, step_only=0):
         ]
         if c.get('method'):
             step2_args.extend(['--method', c['method']])
+        if c.get('semantics'):
+            step2_args.extend(['--semantics', c['semantics']])
         if c.get('lp_solver'):
             step2_args.extend(['--lp_solver', c['lp_solver']])
         times[2] = run_step(2, STEPS_DIR / 'step2_epsilon_search.py', step2_args)

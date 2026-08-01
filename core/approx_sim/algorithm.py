@@ -21,7 +21,7 @@ from tqdm import tqdm
 from .corners import enumerate_corners, get_successor_info
 from .coupling import check_coupling
 from .coupling_dual import check_coupling_dual
-from .coupling_tiered import check_coupling_tiered
+from .coupling_tiered import check_coupling_tiered, check_coupling_tiered_coop
 from .lazy_enum import check_coupling_lazy
 
 logger = logging.getLogger(__name__)
@@ -41,9 +41,10 @@ def compute_approx_sim(
     method='corner',
     lp_solver='HIGHS',
     action_order=True,
+    semantics='competitive',
 ):
     """
-    Compute the maximal competitive ε-approximate simulation relation.
+    Compute the maximal ε-approximate simulation relation.
 
     :param imdp1: fine IMDP
     :param imdp2: coarse IMDP
@@ -59,6 +60,8 @@ def compute_approx_sim(
     :param n_jobs: number of parallel threads. -1 for all CPUs, 1 for sequential.
     :param method: 'corner' (per-vertex LP, default) or 'dual' (single nested dual LP)
     :param lp_solver: CVXPY solver name (default 'HIGHS')
+    :param semantics: 'competitive' (Algorithm 2, ∀a2∃a1, default) or
+                      'cooperative' (Algorithm 1, ∀a1, randomized coarse response)
     :return: dict with keys R, iterations, total_lp_calls, total_lp_time, wall_time
     """
     if n_jobs <= 0:
@@ -154,6 +157,58 @@ def compute_approx_sim(
                 _bounds_cache[key] = (succ, pl, pu)
         return _bounds_cache[key]
 
+    # ------ thread-safe cache for the cooperative coarse union ------
+    # V2_union = ⋃_{a2∈Γ2(x2)} C(x2,a2), embedded into a common successor
+    # space (union of all coarse successors across actions at x2).  Shared
+    # across all (s1, s2) pairs with the same s2, so cached per s2.
+    _union_cache = {}
+
+    def _get_coarse_union(s2):
+        """Return (succ2_union_ids, V2_union, succ2_union_set) for cooperative.
+
+        V2_union is a list of np.array vectors, each of length |succ2_union|,
+        obtained by embedding every coarse corner of every action at x2 into
+        the common coarse-successor space.  This realizes the randomized
+        cooperative response polytope Q = conv(⋃_{a2} P2(x2,a2)) with vertex
+        superset V_Q ⊆ ⋃_{a2} C(x2,a2) (sound; cf. paper §VI).
+        """
+        if s2 in _union_cache:
+            return _union_cache[s2]
+
+        # NOTE: do NOT hold _cache_lock here — _get_corners (called below)
+        # itself acquires _cache_lock, and threading.Lock is non-reentrant,
+        # so nesting would deadlock.  _get_corners is thread-safe on its own.
+        num_a2 = P2[s2].shape[0] if s2 < len(P2) else 0
+        # 1. collect the union of coarse successor IDs across actions
+        union_ids = []
+        seen = set()
+        per_action = []  # list of (succ_ids, corners) per a2
+        for a2_pos in range(num_a2):
+            corners2, succ2, _, _ = _get_corners(2, s2, a2_pos)
+            if not corners2 or len(succ2) == 0:
+                continue
+            per_action.append((succ2, corners2))
+            for sid in succ2:
+                sid = int(sid)
+                if sid not in seen:
+                    seen.add(sid)
+                    union_ids.append(sid)
+        union_ids = np.array(union_ids, dtype=int)
+        idx_of = {int(sid): k for k, sid in enumerate(union_ids)}
+        k2u = len(union_ids)
+        # 2. embed each action's corners into the union space
+        V2_union = []
+        for succ2, corners2 in per_action:
+            for c2 in corners2:
+                v = np.zeros(k2u)
+                for t, sid in enumerate(succ2):
+                    v[idx_of[int(sid)]] = c2[t]
+                V2_union.append(v)
+        entry = (union_ids, V2_union, set(int(x) for x in union_ids))
+        with _cache_lock:
+            _union_cache.setdefault(s2, entry)
+        return _union_cache[s2]
+
     # ------ per-pair check function (runs in worker threads) ------
     _profile_lock = threading.Lock()
     _profile = {'corner_time': 0.0, 'lp_time': 0.0, 'lp_count': 0,
@@ -175,6 +230,83 @@ def compute_approx_sim(
 
         num_a2 = P2[s2].shape[0] if s2 < len(P2) else 0
         num_a1 = P1[s1].shape[0] if s1 < len(P1) else 0
+
+        # ============================================================
+        # Cooperative semantics (Algorithm 1): ∀a1 ∀c1 ∃ randomized
+        # coarse response over the union of all coarse actions.  No a2
+        # loop; one coupling LP per fine corner with V2 = V2_union.
+        # ============================================================
+        if semantics == 'cooperative':
+            succ2_union, V2_union, succ2_set = _get_coarse_union(s2)
+
+            for a1_pos in range(num_a1):
+                t0 = time.time()
+                if method in ('lazy', 'dual', 'tiered'):
+                    succ1, pl1, pu1 = _get_bounds(1, s1, a1_pos)
+                    corners1 = None
+                else:
+                    corners1, succ1, pl1, pu1 = _get_corners(1, s1, a1_pos)
+                _corner_time += time.time() - t0
+
+                if len(succ1) == 0:
+                    continue
+
+                # --- action pre-filter (coarse response covers the union) ---
+                fine_has_r = [False] * len(succ1)
+                for i, sf in enumerate(succ1):
+                    sf = int(sf)
+                    if sf < len(f2c_map) and f2c_map[sf]:
+                        if any(sc in succ2_set for sc in f2c_map[sf]):
+                            fine_has_r[i] = True
+                min_leak = float(sum(
+                    pl1[i] for i in range(len(pl1)) if not fine_has_r[i]
+                ))
+                if min_leak > epsilon + 1e-9:
+                    prefilter_skipped += 1
+                    return ((s1, s2), lp_calls, lp_time, prefilter_skipped)
+
+                # Cooperative currently only supports per-corner FCE
+                # (method='corner'); BCV tiered support is added in
+                # coupling_tiered.coop once Step 3/4 land.
+                if method == 'tiered':
+                    V_Q_mat = np.array(V2_union) if V2_union else \
+                        np.zeros((1, len(succ2_union)))
+                    result = check_coupling_tiered_coop(
+                        pl1, pu1, succ1, V_Q_mat, succ2_union,
+                        R_frozen, epsilon, solver=lp_solver,
+                    )
+                    lp_calls += result['lp_calls']
+                    lp_time += result['lp_time']
+                    if not result['feasible']:
+                        return ((s1, s2), lp_calls, lp_time, prefilter_skipped)
+                    continue
+
+                all_ok = True
+                for c1 in (corners1 or []):
+                    result = check_coupling(
+                        c1, V2_union, succ1, succ2_union, R_frozen,
+                        epsilon, solver=lp_solver,
+                    )
+                    lp_calls += 1
+                    lp_time += result['solve_time']
+                    if not result['feasible']:
+                        all_ok = False
+                        break
+
+                if not all_ok:
+                    return ((s1, s2), lp_calls, lp_time, prefilter_skipped)
+
+            # All fine actions matched → pair survives this iteration
+            with _profile_lock:
+                _profile['corner_time'] += _corner_time
+                _profile['lp_time'] += lp_time
+                _profile['lp_count'] += lp_calls
+                _profile['n_checked'] += 1
+                n_c1 = len(corners1) if corners1 is not None else 0
+                if n_c1 > _profile['max_corners']:
+                    _profile['max_corners'] = n_c1
+                    _profile['max_k1'] = len(succ1)
+            return (None, lp_calls, lp_time, prefilter_skipped)
 
         for a2_pos in range(num_a2):
             t0 = time.time()

@@ -208,3 +208,133 @@ def _box_simplex_corners(lb, ub):
                 if not any(np.allclose(p, q) for q in uniq):
                     uniq.append(p)
     return uniq
+
+
+# ---------------------------------------------------------------------------
+# Cooperative (general-polytope) variants.
+#
+# Under cooperative semantics the coarse response polytope is
+#   Q = conv( ⋃_{a2} P2(x2,a2) ),   a general polytope (NOT a box-simplex).
+# By Lemma `lem:polytope-ext`, the extremal mass over Q is attained at a vertex:
+#   min_{q in Q} q(S) = min_{v in V_Q} v(S),   max_{q in Q} q(S) = max_{v in V_Q} v(S).
+# The vertex *superset* V_Q ⊆ ⋃_{a2} C(x2,a2) (the union of per-action corners,
+# embedded into a common coarse-successor space) is sound: enumerating a superset
+# gives U2 >= true max and L2 <= true min (equality when the superset is tight).
+# LB* / exact-g constrain q* = beta @ V_Q_mat (beta in the simplex), i.e. q* in
+# conv(V_Q), instead of the box-simplex lb<=q<=ub.
+# ---------------------------------------------------------------------------
+
+
+def _vertex_mass_max(S_idx, V_mat):
+    """max_{v in V} v(S) over the rows of V_mat [L x k2] (Lemma polytope-ext)."""
+    if len(S_idx) == 0:
+        return 0.0
+    return float(np.max(np.sum(V_mat[:, S_idx], axis=1)))
+
+
+def _vertex_mass_min(S_idx, V_mat):
+    """min_{v in V} v(S) over the rows of V_mat [L x k2] (Lemma polytope-ext)."""
+    if len(S_idx) == 0:
+        return 0.0
+    return float(np.min(np.sum(V_mat[:, S_idx], axis=1)))
+
+
+def compute_bounds_lpfree_coop(pl1, pu1, succ1, V_Q_mat, succ2, R_local):
+    """Sound LP-free UB/LB_min for one cooperative sub-pair (s1,a1,x2).
+
+    Same bracketing as :func:`compute_bounds_lpfree` but the coarse response is
+    the general polytope Q = conv(V_Q) with vertex superset V_Q_mat [L x k2]
+    (the union of all coarse-action corners embedded into the common successor
+    space), so U2/L2 use vertex enumeration (Lemma polytope-ext) instead of the
+    box-simplex closed form.
+
+    :param pl1,pu1: np.array [k1] fine interval bounds (fine side is still a
+                    box-simplex P1(x1,a1); L1 unchanged)
+    :param succ1:   np.array [k1] fine successor state IDs
+    :param V_Q_mat: np.array [L, k2] coarse corner vertices (the union superset)
+    :param succ2:   np.array [k2] coarse successor state IDs (the union space)
+    :param R_local: set of (s1_state, s2_state) int pairs
+    :return: dict {UB, LB_min, n_subsets, k1, skipped}
+    """
+    k1 = len(pl1)
+    if k1 > MAX_K1_BRUTE:
+        logger.debug('compute_bounds_lpfree_coop: k1=%d > %d, skipping',
+                     k1, MAX_K1_BRUTE)
+        return {'UB': None, 'LB_min': None, 'n_subsets': None,
+                'k1': k1, 'skipped': True}
+    ub = np.inf
+    lb_min = np.inf
+    n = 0
+    for A in _all_subsets(k1):
+        NA = _neighborhood(A, succ1, succ2, R_local)
+        l1 = _L1(A, pl1, pu1)
+        u2 = _vertex_mass_max(NA, V_Q_mat)
+        l2 = _vertex_mass_min(NA, V_Q_mat)
+        ub = min(ub, l1 + u2)
+        lb_min = min(lb_min, l1 + l2)
+        n += 1
+    return {'UB': float(ub), 'LB_min': float(lb_min), 'n_subsets': n,
+            'k1': k1, 'skipped': False}
+
+
+def compute_lb_star_coop(pl1, pu1, succ1, V_Q_mat, succ2, R_local, solver=None):
+    """Tightest LB* = max_{q* in conv(V_Q)} min_A [L1(A) + q*(N(A))] as one LP.
+
+    q* = beta @ V_Q_mat with beta >= 0, sum(beta) == 1 (i.e. q* in conv(V_Q)),
+    replacing the box-simplex constraint lb<=q<=ub of :func:`compute_lb_star`.
+    """
+    import cvxpy as cp
+    k1 = len(pl1)
+    L = V_Q_mat.shape[0]
+    if k1 > MAX_K1_BRUTE:
+        return None
+    subs = _all_subsets(k1)
+    beta = cp.Variable(L)
+    q = beta @ V_Q_mat          # [k2], affine in beta -> q in conv(V_Q)
+    t = cp.Variable()
+    cons = [beta >= 0, cp.sum(beta) == 1]
+    for A in subs:
+        NA = _neighborhood(A, succ1, succ2, R_local)
+        term = _L1(A, pl1, pu1) + (cp.sum(q[NA]) if NA else 0)
+        cons.append(t <= term)
+    prob = cp.Problem(cp.Maximize(t), cons)
+    prob.solve(solver=solver)
+    if prob.status not in ('optimal', 'optimal_inaccurate'):
+        return None
+    return float(t.value)
+
+
+def compute_exact_g_coop(pl1, pu1, succ1, V_Q_mat, succ2, R_local,
+                         fine_corners=None, solver=None):
+    """Exact g = min_{c in C(P1)} max_{q in conv(V_Q)} Phi(c,q) (one LP/corner).
+
+    Cooperative analogue of :func:`compute_exact_g`. q is free over conv(V_Q)
+    (q = beta @ V_Q_mat) rather than the box-simplex. This equals the per-corner
+    ``check_coupling(c, V_Q_list, ...)`` feasibility threshold, so cooperative
+    FCE (Algorithm 1) and cooperative BCV Tier 3 agree by construction.
+    """
+    import cvxpy as cp
+    k1 = len(pl1)
+    k2 = V_Q_mat.shape[1]
+    L = V_Q_mat.shape[0]
+    if fine_corners is None:
+        fine_corners = _box_simplex_corners(pl1, pu1)
+    r_idx = [(i, j) for i in range(k1) for j in range(k2)
+             if (int(succ1[i]), int(succ2[j])) in R_local]
+    if not r_idx:
+        return 0.0
+    g = np.inf
+    for c in fine_corners:
+        W = cp.Variable((k1, k2))
+        beta = cp.Variable(L)
+        q = beta @ V_Q_mat
+        cons = [W >= 0, beta >= 0, cp.sum(beta) == 1,
+                cp.sum(W, axis=1) == c, cp.sum(W, axis=0) == q]
+        prob = cp.Problem(
+            cp.Maximize(cp.sum(cp.hstack([W[i, j] for (i, j) in r_idx]))), cons)
+        prob.solve(solver=solver)
+        if prob.status not in ('optimal', 'optimal_inaccurate'):
+            g = min(g, 0.0)
+        else:
+            g = min(g, float(prob.value))
+    return float(g)
