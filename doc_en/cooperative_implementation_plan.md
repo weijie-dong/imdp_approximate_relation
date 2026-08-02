@@ -86,6 +86,11 @@ python Main_ApproxSim.py --model Test1D \
     --fine_resolution fine --coarse_resolution coarse \
     --semantics cooperative --method corner --lp_solver HIGHS
 # or use the accelerated BCV:  --method tiered
+# NOTE: Main_ApproxSim.py's --model argparse currently accepts only
+#   Dubins3DApproxSim / DoubleIntegratorApproxSim (NOT Test1D). For 1D use
+#   `run_experiment.py --model 1D --fine <n_cells> --semantics cooperative ...`
+#   (the structured results-dumper, preferred) or `compare_methods_cooperative.py <nf> <nc>`.
+#   2D: --model DoubleIntegratorApproxSim with --fine_resolution fine/medium/coarse.
 ```
 
 **Pipeline via config / run_pipeline (build once, then pair):**

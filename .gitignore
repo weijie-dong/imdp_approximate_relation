@@ -176,3 +176,7 @@ doc_en/email_draft.md
 doc_en/project_overview.md
 doc_en/running_example/email_*.txt
 doc_en/running_example/email_*.md
+
+# Local experiment run artifacts (produced by run_experiment.py / per_pair_epsilon.py)
+runs/
+per_pair_epsilon_*.csv

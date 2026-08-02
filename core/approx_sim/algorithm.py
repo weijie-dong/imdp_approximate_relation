@@ -220,13 +220,17 @@ def compute_approx_sim(
         Accepts (s1, s2, R_frozen) tuple — frozenset is immutable and safe
         for concurrent reads from multiple threads.
 
-        Returns (removed_pair, lp_calls, lp_time, prefilter_skipped).
+        Returns (removed_pair, lp_calls, lp_time, prefilter_skipped,
+                 tier_hist_local).  tier_hist_local is a dict mapping the
+        BCV 'decided_by' tier label to the number of (a1,a2) sub-pairs that
+        label resolved in this pair (empty for method='corner'/'dual'/'lazy').
         """
         s1, s2, R_frozen = args
         lp_calls = 0
         lp_time = 0.0
         prefilter_skipped = 0
         _corner_time = 0.0
+        tier_hist_local = {}
 
         num_a2 = P2[s2].shape[0] if s2 < len(P2) else 0
         num_a1 = P1[s1].shape[0] if s1 < len(P1) else 0
@@ -263,7 +267,7 @@ def compute_approx_sim(
                 ))
                 if min_leak > epsilon + 1e-9:
                     prefilter_skipped += 1
-                    return ((s1, s2), lp_calls, lp_time, prefilter_skipped)
+                    return ((s1, s2), lp_calls, lp_time, prefilter_skipped, tier_hist_local)
 
                 # Cooperative currently only supports per-corner FCE
                 # (method='corner'); BCV tiered support is added in
@@ -277,8 +281,11 @@ def compute_approx_sim(
                     )
                     lp_calls += result['lp_calls']
                     lp_time += result['lp_time']
+                    _lbl = result.get('decided_by')
+                    if _lbl is not None:
+                        tier_hist_local[_lbl] = tier_hist_local.get(_lbl, 0) + 1
                     if not result['feasible']:
-                        return ((s1, s2), lp_calls, lp_time, prefilter_skipped)
+                        return ((s1, s2), lp_calls, lp_time, prefilter_skipped, tier_hist_local)
                     continue
 
                 all_ok = True
@@ -294,7 +301,7 @@ def compute_approx_sim(
                         break
 
                 if not all_ok:
-                    return ((s1, s2), lp_calls, lp_time, prefilter_skipped)
+                    return ((s1, s2), lp_calls, lp_time, prefilter_skipped, tier_hist_local)
 
             # All fine actions matched → pair survives this iteration
             with _profile_lock:
@@ -306,7 +313,7 @@ def compute_approx_sim(
                 if n_c1 > _profile['max_corners']:
                     _profile['max_corners'] = n_c1
                     _profile['max_k1'] = len(succ1)
-            return (None, lp_calls, lp_time, prefilter_skipped)
+            return (None, lp_calls, lp_time, prefilter_skipped, tier_hist_local)
 
         for a2_pos in range(num_a2):
             t0 = time.time()
@@ -396,6 +403,9 @@ def compute_approx_sim(
                     )
                     lp_calls += result['lp_calls']
                     lp_time += result['lp_time']
+                    _lbl = result.get('decided_by')
+                    if _lbl is not None:
+                        tier_hist_local[_lbl] = tier_hist_local.get(_lbl, 0) + 1
                     all_ok = result['feasible']
                 else:
                     # Original per-corner enumeration
@@ -417,7 +427,7 @@ def compute_approx_sim(
                     break
 
             if not found_defender:
-                return ((s1, s2), lp_calls, lp_time, prefilter_skipped)
+                return ((s1, s2), lp_calls, lp_time, prefilter_skipped, tier_hist_local)
 
         # Update profile stats
         with _profile_lock:
@@ -430,10 +440,16 @@ def compute_approx_sim(
                 _profile['max_corners'] = n_c1
                 _profile['max_k1'] = len(succ1)
 
-        return (None, lp_calls, lp_time, prefilter_skipped)
+        return (None, lp_calls, lp_time, prefilter_skipped, tier_hist_local)
 
     # ------ Step 2: fixed-point iteration ------
     use_parallel = n_jobs > 1
+
+    # Aggregators accumulated across ALL fixed-point iterations (not just the
+    # last one). tier_hist maps the BCV 'decided_by' label to the number of
+    # sub-pairs it resolved; lp_calls_total is the true total LP count.
+    tier_hist = {}
+    lp_calls_total = 0
 
     for iteration in range(max_iter):
         R_frozen = frozenset(R)
@@ -460,23 +476,27 @@ def compute_approx_sim(
                 with tqdm(total=len(futures), desc=f'  Iter {iteration}',
                           unit='pair', disable=not verbose) as pbar:
                     for future in as_completed(futures):
-                        r_pair, lp_c, lp_t, pref = future.result()
+                        r_pair, lp_c, lp_t, pref, th_local = future.result()
                         if r_pair is not None:
                             removed.add(r_pair)
                         lp_calls_iter += lp_c
                         total_lp_time += lp_t
                         prefilter_skipped += pref
+                        for _k, _v in th_local.items():
+                            tier_hist[_k] = tier_hist.get(_k, 0) + _v
                         pbar.update(1)
         else:
             pbar = tqdm(R_list, desc=f'  Iter {iteration}', unit='pair',
                         disable=not verbose)
             for (s1, s2) in pbar:
-                r_pair, lp_c, lp_t, pref = _check_pair((s1, s2, R_frozen))
+                r_pair, lp_c, lp_t, pref, th_local = _check_pair((s1, s2, R_frozen))
                 if r_pair is not None:
                     removed.add(r_pair)
                 lp_calls_iter += lp_c
                 total_lp_time += lp_t
                 prefilter_skipped += pref
+                for _k, _v in th_local.items():
+                    tier_hist[_k] = tier_hist.get(_k, 0) + _v
             pbar.close()
 
         if verbose:
@@ -498,6 +518,8 @@ def compute_approx_sim(
                     flush=True,
                 )
 
+        lp_calls_total += lp_calls_iter
+
         if not removed:
             if verbose:
                 print(f'Converged at iteration {iteration}, |R| = {len(R)}')
@@ -513,4 +535,6 @@ def compute_approx_sim(
         'total_lp_calls': lp_calls_iter if iteration == 0 else lp_calls_iter,
         'total_lp_time': total_lp_time,
         'wall_time': wall_time,
+        'tier_hist': tier_hist,
+        'lp_calls_total': lp_calls_total,
     }

@@ -102,12 +102,14 @@ def compute_min_epsilon(
     R_hi = result_hi['R']
     hi = 1.0
     lo = 0.0
+    tier_hist_final = dict(result_hi.get('tier_hist', {}))
 
     history = [{
         'epsilon': 1.0,
         'feasible': True,
         'n_pairs': len(R_hi),
         'lp_calls': result_hi['total_lp_calls'],
+        'lp_calls_total': result_hi.get('lp_calls_total', result_hi['total_lp_calls']),
         'wall_time': result_hi['wall_time'],
     }]
 
@@ -125,6 +127,7 @@ def compute_min_epsilon(
         'feasible': (s0_fine, s0_coarse) in result_lo['R'],
         'n_pairs': len(result_lo['R']),
         'lp_calls': result_lo['total_lp_calls'],
+        'lp_calls_total': result_lo.get('lp_calls_total', result_lo['total_lp_calls']),
         'wall_time': result_lo['wall_time'],
     })
 
@@ -136,6 +139,8 @@ def compute_min_epsilon(
             'R_final': result_lo['R'],
             'history': history,
             'total_wall_time': time.time() - t_start,
+            'tier_hist_final': dict(result_lo.get('tier_hist', {})),
+            'converged': True,
         }
 
     # Main binary search
@@ -160,12 +165,14 @@ def compute_min_epsilon(
             'feasible': feasible,
             'n_pairs': len(result['R']),
             'lp_calls': result['total_lp_calls'],
+            'lp_calls_total': result.get('lp_calls_total', result['total_lp_calls']),
             'wall_time': result['wall_time'],
         })
 
         if feasible:
             hi = mid
             R_hi = result['R']
+            tier_hist_final = dict(result.get('tier_hist', {}))
         else:
             lo = mid
 
@@ -180,4 +187,6 @@ def compute_min_epsilon(
         'R_final': R_hi,
         'history': history,
         'total_wall_time': total_time,
+        'tier_hist_final': tier_hist_final,
+        'converged': bool(hi - lo <= tol),
     }

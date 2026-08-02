@@ -1,5 +1,14 @@
 # Large-Scale Run Book — `method='tiered'` (for cluster colleagues)
 
+> ⚠️ **SUPERSEDED (2026-08-02)** — this document is a **competitive-only** runbook
+> (pre-cooperative, pre-schema, lazy/tiered Test1D 35→7/51→17 + 2D). It does
+> NOT cover the E1–E7 experiment matrix, the §5 machine-readable schema, the
+> `--semantics cooperative` path, or probe-trajectory archival.
+> **The current experiment spec is [`doc_en/experiment_task_book.md`](../experiment_task_book.md)**
+> (E1–E7 matrix + §5 dump schema via `run_experiment.py` + cooperative).
+> This document is kept only as a reference for `method='tiered'` semantics and
+> the cluster environment setup.
+
 > Run the **sound tiered** coupling check (`method='tiered'`) against the **sound exact
 > baseline** (`method='corner'`) on large IMDP approximate-simulation cases, confirm they
 > agree on `epsilon_min` / `|R|` (exactness), and collect speedup / residual stats for the
