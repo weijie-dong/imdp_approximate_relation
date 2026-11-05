@@ -113,8 +113,8 @@ def _finalize_imdp(model, args, label, t0):
     return model, partition, imdp
 
 
-def build_pair(args, model_key, fine_spec, coarse_spec):
-    """Build (fine, coarse) IMDP pair + f2c map. Returns a dict."""
+def build_pair(args, model_key, fine_spec, coarse_spec, *, with_mapping=True):
+    """Build an IMDP pair; retain the legacy f2c map only when requested."""
     if model_key == '1D':
         mf, pf, imf = build_test_imdp_1d(args, int(fine_spec), 'Fine')
         mc, pc, imc = build_test_imdp_1d(args, int(coarse_spec), 'Coarse')
@@ -123,12 +123,15 @@ def build_pair(args, model_key, fine_spec, coarse_spec):
         mc, pc, imc = build_di_imdp_2d(args, coarse_spec, 'Coarse')
     else:
         raise ValueError(f'Unknown --model {model_key}; use 1D or 2D.')
-    f2c = build_fine_to_coarse_map(pf, pc)
-    label_result = check_label_consistency(f2c, pf, pc)
-    print(f'  f2c mapped {int((np.asarray(f2c) >= 0).sum())}/{pf.size} fine, '
-          f'labels consistent: {label_result["consistent"]}')
-    if not label_result['consistent']:
-        print('  WARNING: label mismatch — ε may be inflated (see E2 (35,7) story).')
+    f2c = None
+    label_result = None
+    if with_mapping:
+        f2c = build_fine_to_coarse_map(pf, pc)
+        label_result = check_label_consistency(f2c, pf, pc)
+        print(f'  f2c mapped {int((np.asarray(f2c) >= 0).sum())}/{pf.size} fine, '
+              f'labels consistent: {label_result["consistent"]}')
+        if not label_result['consistent']:
+            print('  WARNING: label mismatch — ε may be inflated (see E2 (35,7) story).')
     return dict(benchmark=BENCHMARK_NAME[model_key], n_fine=pf.size, n_coarse=pc.size,
                 imf=imf, imc=imc, pf=pf, pc=pc, f2c=f2c, labels=label_result)
 
