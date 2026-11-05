@@ -1,6 +1,7 @@
 # HSCC 2027: revised Algorithm 1 baseline
 
-`run_hscc2027.py` is the single entry point for the revised paper's Table 1.
+`run_hscc2027.py` is the single entry point for revised Algorithm 1 and
+Algorithm 2 experiments.
 It treats **M1 as the smaller abstract IMDP** and **M2 as the larger concrete
 IMDP**, includes the separately stored absorbing probability, and initializes
 the relation with every label-matching state pair. It uses complete vertex
@@ -34,6 +35,28 @@ For fixed-epsilon diagnosis, add `--epsilon 0.1 --diagnose`. The output contains
 `diagnostic.json` is added in fixed-epsilon diagnostic mode. Timing excludes
 benchmark model construction and includes relation computation across probes.
 
+## Algorithm 2: minimum error for a fixed relation
+
+Supply an existing `relation.csv` with exactly `M1_state,M2_state` columns.
+The relation must contain the initial pair, use valid state IDs, and preserve
+labels. The command evaluates the relation unchanged under the requested
+semantics; it does not search for another relation. For example, after the
+cooperative Algorithm 1 command above:
+
+```bash
+python run_hscc2027.py --model 1D --coarse 5 --fine 10 \
+  --semantics cooperative \
+  --relation-csv runs_hscc2027/1D_5_10_cooperative/relation.csv \
+  --out-dir runs_hscc2027/1D_5_10_cooperative_fixed_relation
+```
+
+Run the corresponding competitive command with its own Algorithm 1 relation.
+Algorithm 2 writes `result.json` with `epsilon_star` and `worst_pair`, plus
+`pair_errors.csv`, `relation.csv`, and an empty `history.json`. An Algorithm 1
+relation at a feasible bisection upper bound may have a smaller exact fixed
+relation error; compare `epsilon_star` with the bisection bracket. State the
+source of the chosen fixed relation when reporting Algorithm 2 results.
+
 The 1D benchmark pairs in Table 1 are `(5,15)`, `(7,21)`, `(5,25)`, `(7,35)`,
 `(17,51)`, `(5,10)`, `(10,20)`, and `(20,40)`, always passed as
 `--coarse M1 --fine M2`. The 2D pairs use `--model 2D --coarse coarse` with
@@ -55,5 +78,5 @@ pair, starting with a small 1D case on the server to confirm the environment.
   incomplete vertex set. Report a failure instead of changing the semantics
   or silently dropping vertices.
 
-Algorithm 2 (fixed-relation minimum error) and Algorithm 3 (joint search) are
-separate follow-up work. This entry point is for Algorithm 1 and bisection.
+Algorithm 3 (joint search) is separate follow-up work. The fixed-relation
+Algorithm 2 result is not a global minimum across relations.

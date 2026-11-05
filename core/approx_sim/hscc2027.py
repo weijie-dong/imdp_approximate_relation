@@ -207,6 +207,45 @@ def minimum_outside_mass(a1, a2, relation, fixed_side):
     return values
 
 
+def fixed_relation_min_error(m1, m2, relation, semantics):
+    """HSCC Algorithm 2: exact minimum error for an unchanged relation."""
+    if semantics not in ("cooperative", "competitive"):
+        raise ValueError("Unknown semantics")
+    relation = set(relation)
+    initial_pair = (m1.initial, m2.initial)
+    if initial_pair not in relation:
+        raise ValueError("The fixed relation must contain the initial pair")
+    for s1, s2 in relation:
+        if not (isinstance(s1, int) and isinstance(s2, int)
+                and 0 <= s1 < len(m1.labels) and 0 <= s2 < len(m2.labels)):
+            raise ValueError("The fixed relation contains an invalid state pair")
+        if m1.labels[s1] != m2.labels[s2]:
+            raise ValueError("The fixed relation contains a label mismatch")
+
+    fixed_side = 1 if semantics == "cooperative" else 2
+    start = perf_counter()
+    epsilon_star = 0.0
+    worst_pair = None
+    lp_calls = 0
+    pair_errors = []
+    for s1, s2 in sorted(relation):
+        local_error = 0.0
+        for a1 in m1.actions[s1]:
+            best_action_error = 1.0
+            for a2 in m2.actions[s2]:
+                errors = minimum_outside_mass(a1, a2, relation, fixed_side)
+                lp_calls += len(errors)
+                best_action_error = min(best_action_error, max(errors))
+            local_error = max(local_error, best_action_error)
+        pair_errors.append((s1, s2, local_error))
+        if local_error > epsilon_star:
+            epsilon_star = local_error
+            worst_pair = (s1, s2)
+    return {"epsilon_star": epsilon_star, "worst_pair": worst_pair,
+            "pair_errors": pair_errors, "lp_calls": lp_calls,
+            "wall_time": perf_counter() - start}
+
+
 def greatest_relation(m1, m2, epsilon, semantics, *, diagnose=False):
     """HSCC Algorithm 1: greatest label-preserving relation at fixed epsilon."""
     if semantics not in ("cooperative", "competitive"):

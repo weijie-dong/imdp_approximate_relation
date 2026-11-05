@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from core.approx_sim.hscc2027 import (
-    Action, Model, from_imdp, greatest_relation, interval_vertices,
+    Action, Model, fixed_relation_min_error, from_imdp, greatest_relation, interval_vertices,
     minimum_outside_mass, search_min_epsilon,
 )
 
@@ -125,6 +125,29 @@ class HSCC2027Tests(unittest.TestCase):
         np.testing.assert_allclose(
             [error for _, error in result["initial_failure"]["M2_action_worst_errors"]],
             [0.6, 0.6], atol=1e-8)
+
+    def test_algorithm2_fixed_relation_error_matches_action_quantifiers(self):
+        abstract = model([interval(0.2, 0.8)])
+        concrete = model([point(0.2), point(0.8)])
+        relation = {(0, 0), (1, 1), (2, 2)}
+        cooperative = fixed_relation_min_error(
+            abstract, concrete, relation, "cooperative")
+        competitive = fixed_relation_min_error(
+            abstract, concrete, relation, "competitive")
+        self.assertAlmostEqual(cooperative["epsilon_star"], 0.6)
+        self.assertEqual(cooperative["worst_pair"], (0, 0))
+        self.assertAlmostEqual(competitive["epsilon_star"], 0)
+        self.assertEqual(len(cooperative["pair_errors"]), len(relation))
+        for semantics, error in (("cooperative", 0.6), ("competitive", 0)):
+            self.assertTrue(greatest_relation(abstract, concrete, error, semantics)
+                            ["initial_pair_present"])
+
+    def test_algorithm2_rejects_invalid_fixed_relations(self):
+        one = model([point(0.2)])
+        with self.assertRaisesRegex(ValueError, "initial pair"):
+            fixed_relation_min_error(one, one, {(1, 1)}, "cooperative")
+        with self.assertRaisesRegex(ValueError, "label mismatch"):
+            fixed_relation_min_error(one, one, {(0, 0), (1, 2)}, "cooperative")
 
 
 if __name__ == "__main__":

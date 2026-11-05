@@ -15,7 +15,9 @@ from pathlib import Path
 import jax
 import numpy as np
 
-from core.approx_sim.hscc2027 import from_imdp, greatest_relation, search_min_epsilon
+from core.approx_sim.hscc2027 import (
+    fixed_relation_min_error, from_imdp, greatest_relation, search_min_epsilon,
+)
 from core.jax_config import configure_jax
 from core.options import parse_arguments
 from run_experiment import build_pair
@@ -28,12 +30,18 @@ def main():
     parser.add_argument("--fine", required=True, help="M2 partition resolution")
     parser.add_argument("--semantics", choices=("cooperative", "competitive"), required=True)
     parser.add_argument("--epsilon", type=float, help="Fixed-epsilon Algorithm 1 check")
+    parser.add_argument("--relation-csv", type=Path,
+                        help="Algorithm 2: read a fixed M1_state,M2_state relation")
     parser.add_argument("--eps-tol", type=float, default=1e-3)
     parser.add_argument("--max-support", type=int, default=16)
     parser.add_argument("--diagnose", action="store_true",
                         help="Record removed pairs and initial-pair failure (fixed epsilon)")
     parser.add_argument("--out-dir", type=Path, required=True)
     cli = parser.parse_args()
+    if cli.relation_csv is not None and cli.epsilon is not None:
+        parser.error("--relation-csv and --epsilon are separate modes")
+    if cli.relation_csv is not None and cli.diagnose:
+        parser.error("--diagnose is only available for fixed-epsilon Algorithm 1")
     if cli.diagnose and cli.epsilon is None:
         parser.error("--diagnose currently requires --epsilon")
 
@@ -54,7 +62,23 @@ def main():
     m2 = from_imdp(pair["imf"], pair["pf"], max_support=cli.max_support)
     initial_pair = (m1.initial, m2.initial)
     print("[HSCC] Running exact relation algorithm", flush=True)
-    if cli.epsilon is None:
+    pair_errors = None
+    if cli.relation_csv is not None:
+        with cli.relation_csv.open(newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames != ["M1_state", "M2_state"]:
+                raise ValueError("Relation CSV must have M1_state,M2_state columns")
+            rows = list(reader)
+        relation = {(int(row["M1_state"]), int(row["M2_state"])) for row in rows}
+        if len(relation) != len(rows):
+            raise ValueError("Relation CSV contains duplicate state pairs")
+        outcome = fixed_relation_min_error(m1, m2, relation, cli.semantics)
+        pair_errors = outcome["pair_errors"]
+        history = []
+        epsilon_upper = None
+        epsilon_lower = None
+        epsilon_fixed = None
+    elif cli.epsilon is None:
         outcome = search_min_epsilon(m1, m2, cli.semantics, tolerance=cli.eps_tol)
         relation = outcome["R"]
         history = [
@@ -85,7 +109,8 @@ def main():
         ["git", "status", "--porcelain"], cwd=args.cwd, text=True).strip())
     summary = {
         "definition": "HSCC_2027/revised_M1_abstract_M2_concrete",
-        "algorithm": "Algorithm 1 + bisection" if cli.epsilon is None else "Algorithm 1",
+        "algorithm": ("Algorithm 2" if cli.relation_csv is not None else
+                      "Algorithm 1 + bisection" if cli.epsilon is None else "Algorithm 1"),
         "benchmark": pair["benchmark"], "semantics": cli.semantics,
         "M1_partition_states": pair["n_coarse"],
         "M2_partition_states": pair["n_fine"],
@@ -94,10 +119,14 @@ def main():
         "initial_pair_in_relation": initial_pair in relation,
         "relation_size": len(relation),
         "epsilon_fixed": epsilon_fixed,
+        "epsilon_star": outcome["epsilon_star"] if pair_errors is not None else None,
+        "worst_pair": outcome["worst_pair"] if pair_errors is not None else None,
         "epsilon_upper": epsilon_upper, "epsilon_lower": epsilon_lower,
-        "tolerance": cli.eps_tol if cli.epsilon is None else None,
-        "lp_calls_total": sum(h["lp_calls"] for h in history),
-        "wall_time_s_total": sum(h["wall_time_s"] for h in history),
+        "tolerance": cli.eps_tol if cli.epsilon is None and pair_errors is None else None,
+        "lp_calls_total": (outcome["lp_calls"] if pair_errors is not None else
+                           sum(h["lp_calls"] for h in history)),
+        "wall_time_s_total": (outcome["wall_time"] if pair_errors is not None else
+                              sum(h["wall_time_s"] for h in history)),
         "probe_count": len(history), "solver": "SciPy linprog/HiGHS",
         "python": sys.version.split()[0],
         "git_commit": commit, "git_dirty": dirty,
@@ -107,6 +136,11 @@ def main():
         json.dumps(summary, indent=2), encoding="utf-8")
     (cli.out_dir / "history.json").write_text(
         json.dumps(history, indent=2), encoding="utf-8")
+    if pair_errors is not None:
+        with (cli.out_dir / "pair_errors.csv").open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(("M1_state", "M2_state", "local_error"))
+            writer.writerows(pair_errors)
     if cli.diagnose:
         def describe_actions(model):
             return [
