@@ -190,6 +190,30 @@ class HSCC2027Tests(unittest.TestCase):
                 self.assertEqual(result["R"], {(0, 0), (2, 2), (3, 3)})
                 self.assertEqual(result["history"][0]["removed_pair"], (1, 1))
 
+    def test_progress_reports_lp_work_without_changing_results(self):
+        abstract = model([interval(0.2, 0.8)])
+        concrete = model([point(0.2), point(0.8)])
+        events = []
+        result = greatest_relation(abstract, concrete, 0.3, "cooperative",
+                                   progress=events.append)
+        self.assertEqual(result["R"], {(1, 1), (2, 2)})
+        self.assertTrue(any(event["kind"] == "heartbeat" for event in events))
+        self.assertEqual(events[-1]["lp_calls"], result["lp_calls"])
+
+    def test_bisection_cache_reuses_lp_values_without_changing_relation(self):
+        abstract = model([interval(0.2, 0.8)])
+        concrete = model([point(0.2), point(0.8)])
+        cached = search_min_epsilon(abstract, concrete, "cooperative")
+        uncached = search_min_epsilon(abstract, concrete, "cooperative",
+                                       use_cache=False)
+        self.assertEqual((cached["epsilon_lower"], cached["epsilon_upper"],
+                          cached["R"]),
+                         (uncached["epsilon_lower"], uncached["epsilon_upper"],
+                          uncached["R"]))
+        self.assertGreater(sum(h["cache_hits"] for h in cached["history"]), 0)
+        self.assertLess(sum(h["lp_calls"] for h in cached["history"]),
+                        sum(h["lp_calls"] for h in uncached["history"]))
+
 
 if __name__ == "__main__":
     unittest.main()

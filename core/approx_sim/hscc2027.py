@@ -152,7 +152,7 @@ def from_imdp(imdp, partition, *, max_support=16):
     return Model(tuple(labels), tuple(actions), int(imdp.s_init))
 
 
-def minimum_outside_mass(a1, a2, relation, fixed_side):
+def minimum_outside_mass(a1, a2, relation, fixed_side, *, on_lp=None):
     """Return one d_k value for each vertex of the fixed-side action.
 
     The LP uses a full coupling matrix W and a convex mixture of vertices on
@@ -204,10 +204,12 @@ def minimum_outside_mass(a1, a2, relation, fixed_side):
         if not result.success:
             raise RuntimeError(f"Coupling LP failed: {result.message}")
         values.append(float(np.clip(result.fun, 0, 1)))
+        if on_lp is not None:
+            on_lp()
     return values
 
 
-def fixed_relation_min_error(m1, m2, relation, semantics):
+def fixed_relation_min_error(m1, m2, relation, semantics, *, progress=None):
     """HSCC Algorithm 2: exact minimum error for an unchanged relation."""
     if semantics not in ("cooperative", "competitive"):
         raise ValueError("Unknown semantics")
@@ -228,12 +230,28 @@ def fixed_relation_min_error(m1, m2, relation, semantics):
     worst_pair = None
     lp_calls = 0
     pair_errors = []
+    pairs_total = len(relation)
+    pairs_done = 0
+    live_lp = 0
+
+    def on_lp():
+        nonlocal live_lp
+        live_lp += 1
+        if progress is not None:
+            progress({"kind": "heartbeat", "mode": "fixed_relation",
+                      "pairs_done": pairs_done, "pairs_total": pairs_total,
+                      "lp_calls": live_lp})
+
+    if progress is not None:
+        progress({"kind": "start", "mode": "fixed_relation",
+                  "pairs_total": pairs_total})
     for s1, s2 in sorted(relation):
         local_error = 0.0
         for a1 in m1.actions[s1]:
             best_action_error = 1.0
             for a2 in m2.actions[s2]:
-                errors = minimum_outside_mass(a1, a2, relation, fixed_side)
+                errors = minimum_outside_mass(a1, a2, relation, fixed_side,
+                                              on_lp=on_lp if progress else None)
                 lp_calls += len(errors)
                 best_action_error = min(best_action_error, max(errors))
             local_error = max(local_error, best_action_error)
@@ -241,12 +259,17 @@ def fixed_relation_min_error(m1, m2, relation, semantics):
         if local_error > epsilon_star:
             epsilon_star = local_error
             worst_pair = (s1, s2)
+        pairs_done += 1
+    if progress is not None:
+        progress({"kind": "complete", "mode": "fixed_relation",
+                  "pairs_total": pairs_total, "lp_calls": lp_calls,
+                  "epsilon_star": epsilon_star})
     return {"epsilon_star": epsilon_star, "worst_pair": worst_pair,
             "pair_errors": pair_errors, "lp_calls": lp_calls,
             "wall_time": perf_counter() - start}
 
 
-def joint_min_error(m1, m2, semantics):
+def joint_min_error(m1, m2, semantics, *, progress=None):
     """HSCC Algorithm 3: eliminate worst pairs and retain the first best relation."""
     if semantics not in ("cooperative", "competitive"):
         raise ValueError("Unknown semantics")
@@ -261,7 +284,12 @@ def joint_min_error(m1, m2, semantics):
     history = []
     start = perf_counter()
     while initial_pair in relation:
-        result = fixed_relation_min_error(m1, m2, relation, semantics)
+        round_index = len(history) + 1
+        if progress is not None:
+            progress({"kind": "round_start", "round": round_index,
+                      "relation_size": len(relation)})
+        result = fixed_relation_min_error(m1, m2, relation, semantics,
+                                          progress=progress)
         lp_calls += result["lp_calls"]
         error = result["epsilon_star"]
         improved = error < epsilon_min
@@ -274,13 +302,19 @@ def joint_min_error(m1, m2, semantics):
                         "removed_pair": removed, "improved": improved,
                         "lp_calls": result["lp_calls"],
                         "wall_time_s": result["wall_time"]})
+        if progress is not None:
+            progress({"kind": "round_complete", "round": round_index,
+                      "relation_size": len(relation), "error": error,
+                      "best_error": epsilon_min, "removed_pair": removed,
+                      "lp_calls": result["lp_calls"]})
         relation.remove(removed)
     return {"epsilon_min": epsilon_min, "R": best_relation,
             "history": history, "lp_calls": lp_calls,
             "wall_time": perf_counter() - start}
 
 
-def greatest_relation(m1, m2, epsilon, semantics, *, diagnose=False):
+def greatest_relation(m1, m2, epsilon, semantics, *, diagnose=False,
+                      progress=None, action_cache=None):
     """HSCC Algorithm 1: greatest label-preserving relation at fixed epsilon."""
     if semantics not in ("cooperative", "competitive"):
         raise ValueError("Unknown semantics")
@@ -291,11 +325,30 @@ def greatest_relation(m1, m2, epsilon, semantics, *, diagnose=False):
                 for s2, label2 in enumerate(m2.labels) if label1 == label2}
     initial_size = len(relation)
     lp_calls = 0
+    cache_hits = 0
     start = perf_counter()
     removed_history = []
     initial_failure = None
     for iteration in range(initial_size + 1):
         removed = set()
+        relation_key = frozenset(relation) if action_cache is not None else None
+        pairs_total = len(relation)
+        pairs_done = 0
+        live_lp = 0
+        lp_calls_before_iteration = lp_calls
+
+        def on_lp():
+            nonlocal live_lp
+            live_lp += 1
+            if progress is not None:
+                progress({"kind": "heartbeat", "mode": "relation",
+                          "epsilon": epsilon, "iteration": iteration + 1,
+                          "pairs_done": pairs_done, "pairs_total": pairs_total,
+                          "lp_calls": lp_calls_before_iteration + live_lp})
+
+        if progress is not None:
+            progress({"kind": "iteration_start", "epsilon": epsilon,
+                      "iteration": iteration + 1, "relation_size": pairs_total})
         for s1, s2 in sorted(relation):
             for a1_index, a1 in enumerate(m1.actions[s1]):
                 matched = False
@@ -304,9 +357,21 @@ def greatest_relation(m1, m2, epsilon, semantics, *, diagnose=False):
                     if epsilon == 1:
                         matched = True
                         break
-                    errors = minimum_outside_mass(a1, a2, relation, fixed_side)
-                    lp_calls += len(errors)
-                    worst_error = max(errors)
+                    cache_key = (relation_key, s1, s2, a1_index,
+                                 a2_index, fixed_side)
+                    if action_cache is not None and cache_key in action_cache:
+                        worst_error = action_cache[cache_key]
+                        cache_hits += 1
+                    else:
+                        errors = minimum_outside_mass(
+                            a1, a2, relation, fixed_side,
+                            on_lp=on_lp if progress else None)
+                        lp_calls += len(errors)
+                        worst_error = max(errors)
+                        if action_cache is not None:
+                            if len(action_cache) >= 50_000:
+                                action_cache.clear()
+                            action_cache[cache_key] = worst_error
                     if diagnose and (s1, s2) == (m1.initial, m2.initial):
                         candidate_errors.append((a2_index, worst_error))
                     if worst_error <= epsilon + 1e-9:
@@ -320,9 +385,16 @@ def greatest_relation(m1, m2, epsilon, semantics, *, diagnose=False):
                             "M2_action_worst_errors": candidate_errors,
                         }
                     break
+            pairs_done += 1
+        if progress is not None:
+            progress({"kind": "iteration_complete", "epsilon": epsilon,
+                      "iteration": iteration + 1, "pairs_total": pairs_total,
+                      "removed": len(removed), "lp_calls": lp_calls,
+                      "cache_hits": cache_hits})
         if not removed:
             result = {"R": relation, "iterations": iteration + 1,
                       "lp_calls": lp_calls, "wall_time": perf_counter() - start,
+                      "cache_hits": cache_hits,
                       "initial_pair_present": (m1.initial, m2.initial) in relation}
             if diagnose:
                 result["removed_history"] = removed_history
@@ -334,29 +406,47 @@ def greatest_relation(m1, m2, epsilon, semantics, *, diagnose=False):
     raise RuntimeError("Relation refinement did not converge")
 
 
-def search_min_epsilon(m1, m2, semantics, *, tolerance=1e-3):
+def search_min_epsilon(m1, m2, semantics, *, tolerance=1e-3,
+                       progress=None, use_cache=True):
     """Bisection around Algorithm 1; return a feasible upper bound and trace."""
     if not 0 < tolerance < 1:
         raise ValueError("tolerance must be between zero and one")
     if m1.labels[m1.initial] != m2.labels[m2.initial]:
         raise ValueError("Initial states have different labels")
     history = []
-    high_result = greatest_relation(m1, m2, 1, semantics)
+    action_cache = {} if use_cache else None
+    high_result = greatest_relation(m1, m2, 1, semantics, progress=progress,
+                                    action_cache=action_cache)
     history.append({"epsilon": 1.0, **high_result})
-    low_result = greatest_relation(m1, m2, 0, semantics)
+    if progress is not None:
+        progress({"kind": "probe_complete", "probe": 1, "epsilon": 1.0,
+                  "feasible": high_result["initial_pair_present"],
+                  "relation_size": len(high_result["R"])})
+    low_result = greatest_relation(m1, m2, 0, semantics, progress=progress,
+                                   action_cache=action_cache)
     history.append({"epsilon": 0.0, **low_result})
+    if progress is not None:
+        progress({"kind": "probe_complete", "probe": 2, "epsilon": 0.0,
+                  "feasible": low_result["initial_pair_present"],
+                  "relation_size": len(low_result["R"])})
     if low_result["initial_pair_present"]:
         return {"epsilon_upper": 0.0, "epsilon_lower": 0.0,
                 "R": low_result["R"], "history": history, "converged": True}
     lo, hi = 0.0, 1.0
     while hi - lo > tolerance:
         mid = (lo + hi) / 2
-        result = greatest_relation(m1, m2, mid, semantics)
+        result = greatest_relation(m1, m2, mid, semantics, progress=progress,
+                                   action_cache=action_cache)
         history.append({"epsilon": mid, **result})
         if result["initial_pair_present"]:
             hi, high_result = mid, result
         else:
             lo = mid
+        if progress is not None:
+            progress({"kind": "probe_complete", "probe": len(history),
+                      "epsilon": mid, "feasible": result["initial_pair_present"],
+                      "relation_size": len(result["R"]),
+                      "lower": lo, "upper": hi})
     return {"epsilon_upper": hi, "epsilon_lower": lo,
             "R": high_result["R"], "history": history,
             "converged": hi - lo <= tolerance}

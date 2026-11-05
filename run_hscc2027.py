@@ -11,6 +11,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from time import monotonic
 
 import jax
 import numpy as np
@@ -22,6 +23,58 @@ from core.approx_sim.hscc2027 import (
 from core.jax_config import configure_jax
 from core.options import parse_arguments
 from run_experiment import build_pair
+
+
+class ProgressPrinter:
+    """Flush milestones and throttled in-LP heartbeats to the job log."""
+
+    def __init__(self, interval):
+        self.interval = interval
+        self.last_heartbeat = monotonic()
+        self.round = None
+
+    def __call__(self, event):
+        kind = event["kind"]
+        if kind == "heartbeat":
+            now = monotonic()
+            if now - self.last_heartbeat < self.interval:
+                return
+            self.last_heartbeat = now
+            if self.round is not None:
+                phase = f"round={self.round}"
+            elif event["mode"] == "fixed_relation":
+                phase = "fixed_relation"
+            else:
+                phase = f"epsilon={event['epsilon']:.9g} iter={event['iteration']}"
+            print(f"[progress] {phase} pairs={event['pairs_done']}/"
+                  f"{event['pairs_total']} LP={event['lp_calls']}", flush=True)
+        elif kind == "round_start":
+            self.round = event["round"]
+            print(f"[progress] Algorithm 3 round={self.round} "
+                  f"relation={event['relation_size']}", flush=True)
+        elif kind == "round_complete":
+            print(f"[progress] round={event['round']} error={event['error']:.9g} "
+                  f"best={event['best_error']:.9g} removed={event['removed_pair']} "
+                  f"LP={event['lp_calls']}", flush=True)
+        elif kind == "iteration_start":
+            print(f"[progress] epsilon={event['epsilon']:.9g} "
+                  f"iter={event['iteration']} relation={event['relation_size']}",
+                  flush=True)
+        elif kind == "iteration_complete":
+            print(f"[progress] epsilon={event['epsilon']:.9g} "
+                  f"iter={event['iteration']} checked={event['pairs_total']} "
+                  f"removed={event['removed']} LP={event['lp_calls']} "
+                  f"cache_hits={event['cache_hits']}", flush=True)
+        elif kind == "probe_complete":
+            bracket = (f" bracket=[{event['lower']:.9g},"
+                       f"{event['upper']:.9g}]" if "lower" in event else "")
+            print(f"[progress] probe={event['probe']} "
+                  f"epsilon={event['epsilon']:.9g} feasible={event['feasible']} "
+                  f"relation={event['relation_size']}{bracket}", flush=True)
+        elif kind == "complete" and self.round is None:
+            print(f"[progress] fixed relation complete: pairs={event['pairs_total']} "
+                  f"LP={event['lp_calls']} error={event['epsilon_star']:.9g}",
+                  flush=True)
 
 
 def main():
@@ -36,11 +89,17 @@ def main():
     parser.add_argument("--joint", action="store_true",
                         help="Algorithm 3: jointly find minimum error and greatest relation")
     parser.add_argument("--eps-tol", type=float, default=1e-3)
+    parser.add_argument("--no-action-cache", action="store_true",
+                        help="Disable LP-value reuse across bisection probes")
     parser.add_argument("--max-support", type=int, default=16)
+    parser.add_argument("--progress-interval", type=float, default=15,
+                        help="Seconds between in-LP progress heartbeats")
     parser.add_argument("--diagnose", action="store_true",
                         help="Record removed pairs and initial-pair failure (fixed epsilon)")
     parser.add_argument("--out-dir", type=Path, required=True)
     cli = parser.parse_args()
+    if cli.progress_interval <= 0:
+        parser.error("--progress-interval must be positive")
     if sum((cli.relation_csv is not None, cli.epsilon is not None, cli.joint)) > 1:
         parser.error("--relation-csv, --epsilon, and --joint are separate modes")
     if (cli.relation_csv is not None or cli.joint) and cli.diagnose:
@@ -65,9 +124,10 @@ def main():
     m2 = from_imdp(pair["imf"], pair["pf"], max_support=cli.max_support)
     initial_pair = (m1.initial, m2.initial)
     print("[HSCC] Running exact relation algorithm", flush=True)
+    progress = ProgressPrinter(cli.progress_interval)
     pair_errors = None
     if cli.joint:
-        outcome = joint_min_error(m1, m2, cli.semantics)
+        outcome = joint_min_error(m1, m2, cli.semantics, progress=progress)
         relation = outcome["R"]
         history = outcome["history"]
         epsilon_upper = None
@@ -82,18 +142,22 @@ def main():
         relation = {(int(row["M1_state"]), int(row["M2_state"])) for row in rows}
         if len(relation) != len(rows):
             raise ValueError("Relation CSV contains duplicate state pairs")
-        outcome = fixed_relation_min_error(m1, m2, relation, cli.semantics)
+        outcome = fixed_relation_min_error(m1, m2, relation, cli.semantics,
+                                          progress=progress)
         pair_errors = outcome["pair_errors"]
         history = []
         epsilon_upper = None
         epsilon_lower = None
         epsilon_fixed = None
     elif cli.epsilon is None:
-        outcome = search_min_epsilon(m1, m2, cli.semantics, tolerance=cli.eps_tol)
+        outcome = search_min_epsilon(m1, m2, cli.semantics,
+                                     tolerance=cli.eps_tol, progress=progress,
+                                     use_cache=not cli.no_action_cache)
         relation = outcome["R"]
         history = [
             {"epsilon": h["epsilon"], "feasible": h["initial_pair_present"],
              "relation_size": len(h["R"]), "lp_calls": h["lp_calls"],
+             "cache_hits": h["cache_hits"],
              "wall_time_s": h["wall_time"], "iterations": h["iterations"]}
             for h in outcome["history"]
         ]
@@ -102,7 +166,7 @@ def main():
         epsilon_fixed = None
     else:
         outcome = greatest_relation(m1, m2, cli.epsilon, cli.semantics,
-                                    diagnose=cli.diagnose)
+                                    diagnose=cli.diagnose, progress=progress)
         relation = outcome["R"]
         history = [{"epsilon": cli.epsilon,
                     "feasible": outcome["initial_pair_present"],
@@ -139,6 +203,7 @@ def main():
         "lp_calls_total": (outcome["lp_calls"] if pair_errors is not None
                            or cli.joint else
                            sum(h["lp_calls"] for h in history)),
+        "cache_hits_total": sum(h.get("cache_hits", 0) for h in history),
         "wall_time_s_total": (outcome["wall_time"] if pair_errors is not None
                               or cli.joint else
                               sum(h["wall_time_s"] for h in history)),

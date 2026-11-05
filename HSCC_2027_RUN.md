@@ -1,4 +1,4 @@
-# HSCC 2027: revised Algorithm 1 baseline
+# HSCC 2027: revised algorithms and experiment runner
 
 `run_hscc2027.py` is the single entry point for revised Algorithms 1, 2, and
 3 experiments.
@@ -11,7 +11,7 @@ definitions and must not be used for the revised table.
 
 ## Local validation completed
 
-The ten checks in `tests/test_hscc2027.py` pass. The 1D pair `(5,10)` was run
+The checks in `tests/test_hscc2027.py` pass. The 1D pair `(5,10)` was run
 under both semantics at fixed epsilon and with bisection tolerance `1e-3`.
 These runs verified the pipeline and output schema; they are not the submitted
 Table 1 measurements.
@@ -34,6 +34,25 @@ For fixed-epsilon diagnosis, add `--epsilon 0.1 --diagnose`. The output contains
 `history.json` (all bisection probes), and `relation.csv` (M1/M2 state pairs).
 `diagnostic.json` is added in fixed-epsilon diagnostic mode. Timing excludes
 benchmark model construction and includes relation computation across probes.
+
+Progress is printed and flushed during the run: each bisection probe, each
+fixed-point iteration or Algorithm 3 elimination round, and an in-LP heartbeat
+every 15 seconds by default. Use `--progress-interval SECONDS` to change the
+heartbeat interval. For a Linux server log, use `tee`:
+
+```bash
+set -o pipefail
+python -u run_hscc2027.py --model 1D --coarse 5 --fine 10 \
+  --semantics competitive --eps-tol 1e-3 \
+  --out-dir runs_hscc2027/1D_5_10_competitive 2>&1 | tee 1D_5_10_competitive.log
+```
+
+Bisection reuses each action-pair LP error when the current relation is
+identical across probes; the optimum of that LP does not depend on the tested
+epsilon. The cache holds at most 50,000 entries and is scoped to one run.
+`result.json` records both actual `lp_calls_total` and `cache_hits_total`.
+Use `--no-action-cache` for an uncached comparison. A probe can report zero
+new LPs while still checking the action conditions against cached values.
 
 ## Algorithm 2: minimum error for a fixed relation
 
@@ -76,6 +95,27 @@ removed pair, current error, improvement, and LP count. Compare the exact
 when the bisection upper bound is close enough. Algorithm 3 currently
 recomputes every local error after each deletion, so begin with a small
 server benchmark before attempting large 2D cases.
+
+## CPU parallelism and experiment scheduling
+
+The paper specifies AMD EPYC 7702 **64-core processors**, not 64 GPUs.
+This baseline runs each individual experiment sequentially, but cached
+bisection avoids repeated LP solves. A further safe speedup on the server is
+to run independent benchmark/semantics combinations
+as separate processes, with distinct output directories and logs. Cap solver
+library threads per process (for example `OMP_NUM_THREADS=1` and
+`OPENBLAS_NUM_THREADS=1`) and increase concurrent jobs gradually while
+measuring CPU use, memory, and total wall time. Do not run dependent
+Algorithm 2 jobs until their Algorithm 1 relation CSV exists.
+
+Within one Algorithm 1 fixed-point iteration, state-pair checks all read the
+same frozen relation and are candidates for process parallelism. Algorithm 2
+state-pair errors have the same property. Bisection probes depend on the
+previous bracket, and Algorithm 3 elimination rounds depend on the prior
+deletion, so those outer steps remain sequential. The historical thread-pool
+runner uses earlier definitions and is not a validated parallel backend for
+these algorithms. Measure an exact process-parallel implementation against
+this baseline before using its numbers in the paper.
 
 The 1D benchmark pairs in Table 1 are `(5,15)`, `(7,21)`, `(5,25)`, `(7,35)`,
 `(17,51)`, `(5,10)`, `(10,20)`, and `(20,40)`, always passed as
