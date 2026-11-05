@@ -1,7 +1,7 @@
 # HSCC 2027: revised Algorithm 1 baseline
 
-`run_hscc2027.py` is the single entry point for revised Algorithm 1 and
-Algorithm 2 experiments.
+`run_hscc2027.py` is the single entry point for revised Algorithms 1, 2, and
+3 experiments.
 It treats **M1 as the smaller abstract IMDP** and **M2 as the larger concrete
 IMDP**, includes the separately stored absorbing probability, and initializes
 the relation with every label-matching state pair. It uses complete vertex
@@ -57,6 +57,26 @@ relation at a feasible bisection upper bound may have a smaller exact fixed
 relation error; compare `epsilon_star` with the bisection bracket. State the
 source of the chosen fixed relation when reporting Algorithm 2 results.
 
+## Algorithm 3: joint minimum error and greatest relation
+
+Use `--joint` with the same model and semantics options, without `--epsilon`
+or `--relation-csv`:
+
+```bash
+python run_hscc2027.py --model 1D --coarse 5 --fine 10 \
+  --semantics cooperative --joint \
+  --out-dir runs_hscc2027/1D_5_10_cooperative_joint
+```
+
+Repeat for `competitive`. The output `result.json` contains `epsilon_min`,
+the best relation size, LP count, and elimination rounds. `relation.csv` is
+the greatest relation at that error, and `history.json` records every
+removed pair, current error, improvement, and LP count. Compare the exact
+`epsilon_min` with Algorithm 1's bisection bracket, and compare relations
+when the bisection upper bound is close enough. Algorithm 3 currently
+recomputes every local error after each deletion, so begin with a small
+server benchmark before attempting large 2D cases.
+
 The 1D benchmark pairs in Table 1 are `(5,15)`, `(7,21)`, `(5,25)`, `(7,35)`,
 `(17,51)`, `(5,10)`, `(10,20)`, and `(20,40)`, always passed as
 `--coarse M1 --fine M2`. The 2D pairs use `--model 2D --coarse coarse` with
@@ -78,5 +98,5 @@ pair, starting with a small 1D case on the server to confirm the environment.
   incomplete vertex set. Report a failure instead of changing the semantics
   or silently dropping vertices.
 
-Algorithm 3 (joint search) is separate follow-up work. The fixed-relation
-Algorithm 2 result is not a global minimum across relations.
+The fixed-relation Algorithm 2 result is not a global minimum across
+relations; Algorithm 3 searches over relations directly.

@@ -246,6 +246,40 @@ def fixed_relation_min_error(m1, m2, relation, semantics):
             "wall_time": perf_counter() - start}
 
 
+def joint_min_error(m1, m2, semantics):
+    """HSCC Algorithm 3: eliminate worst pairs and retain the first best relation."""
+    if semantics not in ("cooperative", "competitive"):
+        raise ValueError("Unknown semantics")
+    initial_pair = (m1.initial, m2.initial)
+    if m1.labels[m1.initial] != m2.labels[m2.initial]:
+        raise ValueError("Initial states have different labels")
+    relation = {(s1, s2) for s1, label1 in enumerate(m1.labels)
+                for s2, label2 in enumerate(m2.labels) if label1 == label2}
+    best_relation = relation.copy()
+    epsilon_min = 1.0
+    lp_calls = 0
+    history = []
+    start = perf_counter()
+    while initial_pair in relation:
+        result = fixed_relation_min_error(m1, m2, relation, semantics)
+        lp_calls += result["lp_calls"]
+        error = result["epsilon_star"]
+        improved = error < epsilon_min
+        if improved:
+            epsilon_min = error
+            best_relation = relation.copy()
+        # The theorem permits any maximum-error pair; use a stable order.
+        removed = result["worst_pair"] or min(relation)
+        history.append({"relation_size": len(relation), "error": error,
+                        "removed_pair": removed, "improved": improved,
+                        "lp_calls": result["lp_calls"],
+                        "wall_time_s": result["wall_time"]})
+        relation.remove(removed)
+    return {"epsilon_min": epsilon_min, "R": best_relation,
+            "history": history, "lp_calls": lp_calls,
+            "wall_time": perf_counter() - start}
+
+
 def greatest_relation(m1, m2, epsilon, semantics, *, diagnose=False):
     """HSCC Algorithm 1: greatest label-preserving relation at fixed epsilon."""
     if semantics not in ("cooperative", "competitive"):

@@ -1,12 +1,14 @@
 """Small independent checks of the HSCC action and vertex quantifiers."""
 
 import unittest
+from itertools import combinations
 from types import SimpleNamespace
 
 import numpy as np
 
 from core.approx_sim.hscc2027 import (
-    Action, Model, fixed_relation_min_error, from_imdp, greatest_relation, interval_vertices,
+    Action, Model, fixed_relation_min_error, from_imdp, greatest_relation,
+    interval_vertices, joint_min_error,
     minimum_outside_mass, search_min_epsilon,
 )
 
@@ -148,6 +150,45 @@ class HSCC2027Tests(unittest.TestCase):
             fixed_relation_min_error(one, one, {(1, 1)}, "cooperative")
         with self.assertRaisesRegex(ValueError, "label mismatch"):
             fixed_relation_min_error(one, one, {(0, 0), (1, 2)}, "cooperative")
+
+    def test_algorithm3_matches_exhaustive_relation_search(self):
+        abstract = model([interval(0.2, 0.8)])
+        concrete = model([point(0.2), point(0.8)])
+        label_pairs = [(0, 0), (1, 1), (2, 2)]
+        for semantics in ("cooperative", "competitive"):
+            with self.subTest(semantics=semantics):
+                candidates = []
+                for size in range(1, len(label_pairs) + 1):
+                    for pairs in combinations(label_pairs, size):
+                        if (0, 0) not in pairs:
+                            continue
+                        error = fixed_relation_min_error(
+                            abstract, concrete, pairs, semantics)["epsilon_star"]
+                        candidates.append((error, set(pairs)))
+                expected_error = min(error for error, _ in candidates)
+                expected_relation = set().union(
+                    *(pairs for error, pairs in candidates
+                      if abs(error - expected_error) < 1e-8))
+                result = joint_min_error(abstract, concrete, semantics)
+                self.assertAlmostEqual(result["epsilon_min"], expected_error)
+                self.assertEqual(result["R"], expected_relation)
+                self.assertEqual(result["R"], greatest_relation(
+                    abstract, concrete, result["epsilon_min"], semantics)["R"])
+
+    def test_algorithm3_removes_irrelevant_high_error_pair(self):
+        labels = ("start", "bad", "goal", "unsafe")
+        def deterministic(target):
+            return Action((target,), np.array([[1.0]]))
+        abstract = Model(labels, tuple((deterministic(t),)
+                                       for t in (0, 2, 2, 3)), 0)
+        concrete = Model(labels, tuple((deterministic(t),)
+                                       for t in (0, 3, 2, 3)), 0)
+        for semantics in ("cooperative", "competitive"):
+            with self.subTest(semantics=semantics):
+                result = joint_min_error(abstract, concrete, semantics)
+                self.assertAlmostEqual(result["epsilon_min"], 0)
+                self.assertEqual(result["R"], {(0, 0), (2, 2), (3, 3)})
+                self.assertEqual(result["history"][0]["removed_pair"], (1, 1))
 
 
 if __name__ == "__main__":
