@@ -1,0 +1,27 @@
+{
+  "definition": "HSCC_2027/revised_M1_abstract_M2_concrete",
+  "algorithm": "Algorithm 1 + bisection",
+  "benchmark": "1D-SI",
+  "semantics": "cooperative",
+  "M1_partition_states": 5,
+  "M2_partition_states": 10,
+  "M1_total_states": 6,
+  "M2_total_states": 11,
+  "initial_pair": [
+    1,
+    2
+  ],
+  "initial_pair_in_relation": true,
+  "relation_size": 21,
+  "epsilon_fixed": null,
+  "epsilon_upper": 0.5,
+  "epsilon_lower": 0.4990234375,
+  "tolerance": 0.001,
+  "lp_calls_total": 5733,
+  "wall_time_s_total": 7.24520880007185,
+  "probe_count": 12,
+  "solver": "SciPy linprog/HiGHS",
+  "python": "3.13.14",
+  "git_commit": "451339ad3f78c7e620669589b89d650229277730",
+  "git_dirty": true
+}

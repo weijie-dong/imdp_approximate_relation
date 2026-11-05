@@ -1,0 +1,10 @@
+[
+  {
+    "epsilon": 0.9520000029733637,
+    "feasible": true,
+    "relation_size": 34,
+    "lp_calls": 1161,
+    "wall_time_s": 1.5658545999322087,
+    "iterations": 3
+  }
+]

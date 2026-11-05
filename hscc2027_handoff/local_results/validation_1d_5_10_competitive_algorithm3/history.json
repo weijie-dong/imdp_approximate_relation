@@ -1,0 +1,68 @@
+[
+  {
+    "relation_size": 35,
+    "error": 9.999999747378752e-05,
+    "removed_pair": [
+      1,
+      0
+    ],
+    "improved": true,
+    "lp_calls": 1531,
+    "wall_time_s": 1.9886471000500023
+  },
+  {
+    "relation_size": 34,
+    "error": 9.999999747378752e-05,
+    "removed_pair": [
+      1,
+      1
+    ],
+    "improved": false,
+    "lp_calls": 1486,
+    "wall_time_s": 1.9356996999122202
+  },
+  {
+    "relation_size": 33,
+    "error": 9.999999747378752e-05,
+    "removed_pair": [
+      1,
+      8
+    ],
+    "improved": false,
+    "lp_calls": 1441,
+    "wall_time_s": 1.861517300014384
+  },
+  {
+    "relation_size": 32,
+    "error": 0.50010000338807,
+    "removed_pair": [
+      1,
+      9
+    ],
+    "improved": false,
+    "lp_calls": 1396,
+    "wall_time_s": 1.8314420999959111
+  },
+  {
+    "relation_size": 31,
+    "error": 9.999999747378752e-05,
+    "removed_pair": [
+      2,
+      4
+    ],
+    "improved": false,
+    "lp_calls": 1351,
+    "wall_time_s": 1.7393510999390855
+  },
+  {
+    "relation_size": 30,
+    "error": 0.4997999966144562,
+    "removed_pair": [
+      1,
+      2
+    ],
+    "improved": false,
+    "lp_calls": 1306,
+    "wall_time_s": 1.7089977000141516
+  }
+]

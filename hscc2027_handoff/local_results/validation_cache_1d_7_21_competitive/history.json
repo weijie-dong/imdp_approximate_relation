@@ -1,0 +1,110 @@
+[
+  {
+    "epsilon": 1.0,
+    "feasible": true,
+    "relation_size": 112,
+    "lp_calls": 0,
+    "cache_hits": 0,
+    "wall_time_s": 0.0001697000116109848,
+    "iterations": 1
+  },
+  {
+    "epsilon": 0.0,
+    "feasible": false,
+    "relation_size": 1,
+    "lp_calls": 17764,
+    "cache_hits": 0,
+    "wall_time_s": 26.912251500063576,
+    "iterations": 4
+  },
+  {
+    "epsilon": 0.5,
+    "feasible": true,
+    "relation_size": 112,
+    "lp_calls": 1896,
+    "cache_hits": 297,
+    "wall_time_s": 2.762976700090803,
+    "iterations": 1
+  },
+  {
+    "epsilon": 0.25,
+    "feasible": true,
+    "relation_size": 112,
+    "lp_calls": 96,
+    "cache_hits": 392,
+    "wall_time_s": 0.1372753999894485,
+    "iterations": 1
+  },
+  {
+    "epsilon": 0.125,
+    "feasible": true,
+    "relation_size": 112,
+    "lp_calls": 0,
+    "cache_hits": 396,
+    "wall_time_s": 0.001353600062429905,
+    "iterations": 1
+  },
+  {
+    "epsilon": 0.0625,
+    "feasible": true,
+    "relation_size": 112,
+    "lp_calls": 0,
+    "cache_hits": 399,
+    "wall_time_s": 0.0013441999908536673,
+    "iterations": 1
+  },
+  {
+    "epsilon": 0.03125,
+    "feasible": true,
+    "relation_size": 112,
+    "lp_calls": 0,
+    "cache_hits": 399,
+    "wall_time_s": 0.0014942999696359038,
+    "iterations": 1
+  },
+  {
+    "epsilon": 0.015625,
+    "feasible": true,
+    "relation_size": 76,
+    "lp_calls": 17858,
+    "cache_hits": 422,
+    "wall_time_s": 25.281980199972168,
+    "iterations": 3
+  },
+  {
+    "epsilon": 0.0078125,
+    "feasible": true,
+    "relation_size": 76,
+    "lp_calls": 720,
+    "cache_hits": 1180,
+    "wall_time_s": 1.0823614000109956,
+    "iterations": 3
+  },
+  {
+    "epsilon": 0.00390625,
+    "feasible": true,
+    "relation_size": 76,
+    "lp_calls": 240,
+    "cache_hits": 1212,
+    "wall_time_s": 0.3603391000069678,
+    "iterations": 3
+  },
+  {
+    "epsilon": 0.001953125,
+    "feasible": true,
+    "relation_size": 76,
+    "lp_calls": 0,
+    "cache_hits": 1222,
+    "wall_time_s": 0.003876900067552924,
+    "iterations": 3
+  },
+  {
+    "epsilon": 0.0009765625,
+    "feasible": true,
+    "relation_size": 76,
+    "lp_calls": 0,
+    "cache_hits": 1222,
+    "wall_time_s": 0.0037712999619543552,
+    "iterations": 3
+  }
+]

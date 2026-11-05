@@ -1,0 +1,178 @@
+[
+  {
+    "relation_size": 35,
+    "error": 0.9998000000050524,
+    "removed_pair": [
+      1,
+      0
+    ],
+    "improved": true,
+    "lp_calls": 817,
+    "wall_time_s": 1.254598900093697
+  },
+  {
+    "relation_size": 34,
+    "error": 0.9998000000050524,
+    "removed_pair": [
+      1,
+      1
+    ],
+    "improved": false,
+    "lp_calls": 793,
+    "wall_time_s": 1.2553608000744134
+  },
+  {
+    "relation_size": 33,
+    "error": 0.9998000000050524,
+    "removed_pair": [
+      1,
+      8
+    ],
+    "improved": false,
+    "lp_calls": 769,
+    "wall_time_s": 1.0309876999817789
+  },
+  {
+    "relation_size": 32,
+    "error": 0.9998000000050524,
+    "removed_pair": [
+      1,
+      9
+    ],
+    "improved": false,
+    "lp_calls": 745,
+    "wall_time_s": 0.9960118000162765
+  },
+  {
+    "relation_size": 31,
+    "error": 0.9998000000050524,
+    "removed_pair": [
+      3,
+      0
+    ],
+    "improved": false,
+    "lp_calls": 721,
+    "wall_time_s": 0.9474849000107497
+  },
+  {
+    "relation_size": 30,
+    "error": 0.9998000000050524,
+    "removed_pair": [
+      3,
+      1
+    ],
+    "improved": false,
+    "lp_calls": 697,
+    "wall_time_s": 0.9256271000485867
+  },
+  {
+    "relation_size": 29,
+    "error": 0.9998000000050524,
+    "removed_pair": [
+      3,
+      8
+    ],
+    "improved": false,
+    "lp_calls": 673,
+    "wall_time_s": 0.9095056999940425
+  },
+  {
+    "relation_size": 28,
+    "error": 0.9998000000050524,
+    "removed_pair": [
+      3,
+      9
+    ],
+    "improved": false,
+    "lp_calls": 649,
+    "wall_time_s": 0.8932589999167249
+  },
+  {
+    "relation_size": 27,
+    "error": 0.5000000033905962,
+    "removed_pair": [
+      0,
+      9
+    ],
+    "improved": true,
+    "lp_calls": 625,
+    "wall_time_s": 0.8967245999956504
+  },
+  {
+    "relation_size": 26,
+    "error": 0.5000000033905962,
+    "removed_pair": [
+      1,
+      7
+    ],
+    "improved": false,
+    "lp_calls": 601,
+    "wall_time_s": 0.8082313999766484
+  },
+  {
+    "relation_size": 25,
+    "error": 0.5000000033905962,
+    "removed_pair": [
+      0,
+      8
+    ],
+    "improved": false,
+    "lp_calls": 577,
+    "wall_time_s": 0.7611952999141067
+  },
+  {
+    "relation_size": 24,
+    "error": 0.5000000033905962,
+    "removed_pair": [
+      3,
+      7
+    ],
+    "improved": false,
+    "lp_calls": 553,
+    "wall_time_s": 0.7161667000036687
+  },
+  {
+    "relation_size": 23,
+    "error": 0.9998000000050524,
+    "removed_pair": [
+      4,
+      9
+    ],
+    "improved": false,
+    "lp_calls": 529,
+    "wall_time_s": 0.689981900039129
+  },
+  {
+    "relation_size": 22,
+    "error": 0.5000000033905962,
+    "removed_pair": [
+      4,
+      8
+    ],
+    "improved": false,
+    "lp_calls": 505,
+    "wall_time_s": 0.6722089999821037
+  },
+  {
+    "relation_size": 21,
+    "error": 0.4997999966144562,
+    "removed_pair": [
+      0,
+      0
+    ],
+    "improved": true,
+    "lp_calls": 481,
+    "wall_time_s": 0.6208628000458702
+  },
+  {
+    "relation_size": 20,
+    "error": 0.4997999966144562,
+    "removed_pair": [
+      1,
+      2
+    ],
+    "improved": false,
+    "lp_calls": 457,
+    "wall_time_s": 0.6179055999964476
+  }
+]
